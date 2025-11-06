@@ -18,9 +18,10 @@
         /* Overlay */
         .overlay {
             background-color: rgba(0,0,0,0.5);
-            height: 100%;
+            min-height: 100%;
             width: 100%;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
@@ -50,9 +51,10 @@
         }
 
         footer {
-            margin-top: 40px;
-            font-size: 0.9em;
+            margin-top: 60px;
+            font-size: 0.8em;
             color: #ccc;
+            text-align: center;
         }
     </style>
 </head>
@@ -61,9 +63,14 @@
         <div class="container">
             <h1>Bienvenue chez Isula Surf</h1>
             <p>Isula Surf est une <span class="highlight">entreprise individuelle active depuis 2017</span>, spécialisée dans les activités récréatives et de loisirs. Nous offrons des services uniques liés au surf et aux activités nautiques, en mettant l'accent sur la sécurité, la qualité et le plaisir de nos clients.</p>
-            <p>Notre siège est situé à <span class="highlight">Porto-Vecchio, Avenue Georges Pompidou</span>, et nous sommes enregistrés légalement avec le SIRET <span class="highlight">809 379 951 00019</span>.</p>
-            <footer>Contactez-nous : 06 45 37 25 06 | IsulaSurf</footer>
+            <p>Notre siège est situé à <span class="highlight">Porto-Vecchio, Avenue Georges Pompidou</span>, et nous sommes enregistrés légalement.</p>
         </div>
+        <footer>
+            <p>GIOVINAZZO JOSE - Entrepreneur individuel</p>
+            <p>SIRET : 809 379 951 00019</p>
+            <p>Activité principale : 93.29Z - Autres activités récréatives et de loisirs</p>
+            <p>Contact : 06 45 37 21 06</p>
+        </footer>
     </div>
 </body>
 </html>
