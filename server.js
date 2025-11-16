@@ -420,7 +420,7 @@ socket.on('playerAbandoned', (data) => {
   if (opponent && abandoned) {
     const elapsed = (Date.now() - room.startTime) / 1000;
     const winnerScore = calculateScore(opponent, elapsed);
-    const loserScore = 0; // Perdant = 0 points
+    const loserScore = 0;
     
     const result = {
       winnerId: opponentId,
@@ -432,7 +432,7 @@ socket.on('playerAbandoned', (data) => {
       reason: 'opponent_abandoned'
     };
     
-    // ✅ NOTIFIER LES DEUX
+    // ✅ NOTIFIER LES DEUX (même celui qui abandonne)
     io.to(opponent.socketId).emit('game_over', result);
     io.to(abandoned.socketId).emit('game_over', result);
     
@@ -442,7 +442,6 @@ socket.on('playerAbandoned', (data) => {
   // ✅ CLEANUP IMMÉDIAT
   if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
   
-  // ✅ ANNULER TIMEOUT RECONNEXION SI EXISTANT
   if (disconnectedPlayers[playerId]) {
     clearTimeout(disconnectedPlayers[playerId].timeout);
     delete disconnectedPlayers[playerId];
@@ -596,4 +595,5 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
