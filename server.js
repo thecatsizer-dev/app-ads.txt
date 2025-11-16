@@ -1,4 +1,5 @@
-// server.js - BACKEND SOCKET.IO PRODUCTION READY v3
+// server.js - BACKEND SOCKET.IO PRODUCTION READY v4 (RENDER OPTIMIZED)
+const fetch = require('node-fetch');
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -7,7 +8,7 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 
-// ✅ CONFIGURATION SOCKET.IO OPTIMISÉE
+// ✅ CONFIGURATION SOCKET.IO OPTIMISÉE POUR RENDER
 const io = socketIO(server, {
   cors: {
     origin: "*",
@@ -16,10 +17,12 @@ const io = socketIO(server, {
   },
   transports: ['websocket', 'polling'],
   allowEIO3: true,
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  connectTimeout: 45000,
-  upgradeTimeout: 30000
+  pingTimeout: 20000,
+  pingInterval: 10000,
+  connectTimeout: 10000,
+  upgradeTimeout: 10000,
+  serveClient: false,
+  perMessageDeflate: false
 });
 
 app.use(cors());
@@ -470,13 +473,28 @@ io.on('connection', (socket) => {
 
 // ========== ROUTES API ==========
 
+app.get('/', (req, res) => {
+  res.json({
+    status: 'alive',
+    message: 'Sudoku Server is running',
+    uptime: Math.round(process.uptime()),
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/health', (req, res) => {
+  const memUsage = process.memoryUsage();
   res.json({
     status: 'ok',
+    uptime: Math.round(process.uptime()),
     rooms: Object.keys(rooms).length,
     classicQueue: classicQueue.length,
     powerupQueue: powerupQueue.length,
     connectedPlayers: Object.keys(connectedSockets).length,
+    memory: {
+      heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + ' MB',
+      heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + ' MB'
+    },
     timestamp: new Date().toISOString()
   });
 });
@@ -503,8 +521,23 @@ setInterval(() => {
   console.log(`   Classic Queue: ${classicQueue.length}`);
   console.log(`   Power-Up Queue: ${powerupQueue.length}`);
   console.log(`   Players: ${Object.keys(connectedSockets).length}`);
+  console.log(`   Uptime: ${Math.round(process.uptime())}s`);
   console.log('==============================');
-}, 60000);
+}, 300000);
+
+// ========== AUTO-PING POUR ÉVITER LE SLEEP RENDER ==========
+
+if (process.env.RENDER_EXTERNAL_URL) {
+  setInterval(() => {
+    const url = process.env.RENDER_EXTERNAL_URL + '/health';
+    console.log('🏓 Auto-ping:', url);
+    
+    fetch(url)
+      .then(res => res.json())
+      .then(data => console.log('✅ Ping OK:', data.status))
+      .catch(err => console.error('❌ Ping failed:', err.message));
+  }, 840000);
+}
 
 // ========== DÉMARRAGE SERVEUR ==========
 
