@@ -50,37 +50,31 @@ function getOpponentSocketId(roomId, playerId) {
   return connectedSockets[opponentId];
 }
 
-function isValidSudokuMove(grid, row, col, value) {
-  for (let c = 0; c < 9; c++) {
-    if (c !== col && grid[row][c] === value) return false;
-  }
-  
-  for (let r = 0; r < 9; r++) {
-    if (r !== row && grid[r][col] === value) return false;
-  }
-  
-  const startRow = Math.floor(row / 3) * 3;
-  const startCol = Math.floor(col / 3) * 3;
-  for (let r = startRow; r < startRow + 3; r++) {
-    for (let c = startCol; c < startCol + 3; c++) {
-      if ((r !== row || c !== col) && grid[r][c] === value) return false;
-    }
-  }
-  
-  return true;
-}
-
 function validateMove(roomId, playerId, row, col, value) {
   const room = rooms[roomId];
-  if (!room) return false;
+  if (!room) {
+    console.log('❌ Room introuvable');
+    return false;
+  }
   
   const player = room.players[playerId];
-  if (!player) return false;
+  if (!player) {
+    console.log('❌ Player introuvable');
+    return false;
+  }
   
-  if (player.grid[row][col] !== 0) return false;
-  if (!isValidSudokuMove(player.grid, row, col, value)) return false;
+  // ✅ Case déjà remplie ?
+  if (player.grid[row][col] !== 0) {
+    console.log(`⚠️ Case (${row},${col}) déjà remplie`);
+    return false;
+  }
   
-  return player.solution[row][col] === value;
+  // ✅ Compare UNIQUEMENT avec la solution
+  const isCorrect = player.solution[row][col] === value;
+  
+  console.log(`${isCorrect ? '✅' : '❌'} (${row},${col}): ${value} vs ${player.solution[row][col]}`);
+  
+  return isCorrect;
 }
 
 function calculateProgress(grid) {
@@ -532,3 +526,4 @@ server.listen(PORT, () => {
   console.log(`🌐 Health check: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
