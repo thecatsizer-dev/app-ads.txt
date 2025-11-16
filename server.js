@@ -1,4 +1,4 @@
-// server.js - BACKEND SOCKET.IO PRODUCTION READY v2
+// server.js - BACKEND SOCKET.IO PRODUCTION READY v3
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -6,14 +6,20 @@ const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
+
+// ✅ CONFIGURATION SOCKET.IO OPTIMISÉE
 const io = socketIO(server, {
   cors: {
     origin: "*",
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST"],
+    credentials: true
   },
   transports: ['websocket', 'polling'],
+  allowEIO3: true,
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
+  connectTimeout: 45000,
+  upgradeTimeout: 30000
 });
 
 app.use(cors());
@@ -26,7 +32,6 @@ const classicQueue = [];
 const powerupQueue = [];
 const connectedSockets = {};
 
-// Timeout inactivité (5 minutes)
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000;
 
 // ========== HELPER FUNCTIONS ==========
@@ -43,19 +48,15 @@ function getOpponentSocketId(roomId, playerId) {
   return connectedSockets[opponentId];
 }
 
-// ✅ VALIDATION COMPLÈTE SUDOKU
 function isValidSudokuMove(grid, row, col, value) {
-  // Vérifier ligne
   for (let c = 0; c < 9; c++) {
     if (c !== col && grid[row][c] === value) return false;
   }
   
-  // Vérifier colonne
   for (let r = 0; r < 9; r++) {
     if (r !== row && grid[r][col] === value) return false;
   }
   
-  // Vérifier bloc 3x3
   const startRow = Math.floor(row / 3) * 3;
   const startCol = Math.floor(col / 3) * 3;
   for (let r = startRow; r < startRow + 3; r++) {
@@ -74,13 +75,9 @@ function validateMove(roomId, playerId, row, col, value) {
   const player = room.players[playerId];
   if (!player) return false;
   
-  // Vérifier case vide
   if (player.grid[row][col] !== 0) return false;
-  
-  // ✅ Valider règles Sudoku
   if (!isValidSudokuMove(player.grid, row, col, value)) return false;
   
-  // ✅ Vérifier contre solution
   return player.solution[row][col] === value;
 }
 
@@ -118,7 +115,6 @@ function generateSudokuPuzzle(difficulty) {
   ];
   
   const puzzle = JSON.parse(JSON.stringify(baseGrid));
-  
   const cellsToRemove = difficulty === 'easy' ? 35 : difficulty === 'medium' ? 45 : 55;
   
   let removed = 0;
@@ -153,7 +149,6 @@ function getSolution() {
   ];
 }
 
-// ✅ GESTION TIMEOUT INACTIVITÉ
 function setupInactivityTimer(roomId) {
   const room = rooms[roomId];
   if (!room) return;
@@ -161,7 +156,6 @@ function setupInactivityTimer(roomId) {
   room.inactivityTimer = setTimeout(() => {
     console.log(`⏰ Timeout inactivité - Room ${roomId}`);
     
-    // Notifier les joueurs
     Object.values(room.players).forEach(player => {
       io.to(player.socketId).emit('game_over', {
         winnerId: null,
@@ -427,7 +421,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('🔌 Déconnexion:', socket.id);
     
-    [classicQueue, powerupQueue].forEach((queue, idx) => {
+    [classicQueue, powerupQueue].forEach((queue) => {
       const index = queue.findIndex(p => p.socketId === socket.id);
       if (index !== -1) {
         const player = queue.splice(index, 1)[0];
@@ -496,8 +490,8 @@ app.get('/stats', (req, res) => {
       status: rooms[id].status,
       uptime: Date.now() - rooms[id].startTime
     })),
-    classicQueue: classicQueue.map(p => ({ name: p.playerName, waiting: Date.now() - (p.joinedAt || Date.now()) })),
-    powerupQueue: powerupQueue.map(p => ({ name: p.playerName, waiting: Date.now() - (p.joinedAt || Date.now()) }))
+    classicQueue: classicQueue.map(p => ({ name: p.playerName })),
+    powerupQueue: powerupQueue.map(p => ({ name: p.playerName }))
   });
 });
 
@@ -512,7 +506,7 @@ setInterval(() => {
   console.log('==============================');
 }, 60000);
 
-// ========== ✅ DÉMARRAGE SERVEUR ==========
+// ========== DÉMARRAGE SERVEUR ==========
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
