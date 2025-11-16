@@ -1,5 +1,4 @@
-// server.js - BACKEND SOCKET.IO PRODUCTION READY v4 (RENDER OPTIMIZED)
-const fetch = require('node-fetch');
+// server.js - BACKEND SOCKET.IO PRODUCTION READY v5 (FREE TIER SAFE)
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -524,20 +523,6 @@ setInterval(() => {
   console.log(`   Uptime: ${Math.round(process.uptime())}s`);
   console.log('==============================');
 }, 300000);
-
-// ========== AUTO-PING POUR ÉVITER LE SLEEP RENDER ==========
-
-if (process.env.RENDER_EXTERNAL_URL) {
-  setInterval(() => {
-    const url = process.env.RENDER_EXTERNAL_URL + '/health';
-    console.log('🏓 Auto-ping:', url);
-    
-    fetch(url)
-      .then(res => res.json())
-      .then(data => console.log('✅ Ping OK:', data.status))
-      .catch(err => console.error('❌ Ping failed:', err.message));
-  }, 840000);
-}
 
 // ========== DÉMARRAGE SERVEUR ==========
 
