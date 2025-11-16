@@ -1,4 +1,4 @@
-// server.js - BACKEND SOCKET.IO PRODUCTION READY v5 (FREE TIER SAFE)
+// server.js - BACKEND SOCKET.IO PRODUCTION READY v6 - FINAL FIX
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -48,33 +48,6 @@ function getOpponentSocketId(roomId, playerId) {
   
   const opponentId = Object.keys(room.players).find(id => id !== playerId);
   return connectedSockets[opponentId];
-}
-
-function validateMove(roomId, playerId, row, col, value) {
-  const room = rooms[roomId];
-  if (!room) {
-    console.log('❌ Room introuvable');
-    return false;
-  }
-  
-  const player = room.players[playerId];
-  if (!player) {
-    console.log('❌ Player introuvable');
-    return false;
-  }
-  
-  // ✅ Case déjà remplie ?
-  if (player.grid[row][col] !== 0) {
-    console.log(`⚠️ Case (${row},${col}) déjà remplie`);
-    return false;
-  }
-  
-  // ✅ Compare UNIQUEMENT avec la solution
-  const isCorrect = player.solution[row][col] === value;
-  
-  console.log(`${isCorrect ? '✅' : '❌'} (${row},${col}): ${value} vs ${player.solution[row][col]}`);
-  
-  return isCorrect;
 }
 
 function calculateProgress(grid) {
@@ -217,7 +190,7 @@ io.on('connection', (socket) => {
             grid: JSON.parse(JSON.stringify(puzzle)),
             solution: JSON.parse(JSON.stringify(solution)),
             correctMoves: 0, errors: 0, combo: 0, energy: 0,
-            progress: 0, speed: 0, lastMoveTime: Date.now()
+            progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
           },
           [opponent.playerId]: {
             playerId: opponent.playerId,
@@ -226,7 +199,7 @@ io.on('connection', (socket) => {
             grid: JSON.parse(JSON.stringify(puzzle)),
             solution: JSON.parse(JSON.stringify(solution)),
             correctMoves: 0, errors: 0, combo: 0, energy: 0,
-            progress: 0, speed: 0, lastMoveTime: Date.now()
+            progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
           }
         },
         status: 'playing',
@@ -261,193 +234,9 @@ io.on('connection', (socket) => {
     });
   });
   
-socket.on('cell_played', (data) => {
-  const { roomId, playerId, row, col, value } = data;
-  
-  const room = rooms[roomId];
-  if (!room) {
-    console.log('❌ Room introuvable');
-    return;
-  }
-  
-  const player = room.players[playerId];
-  if (!player) {
-    console.log('❌ Player introuvable');
-    return;
-  }
-  
-  resetInactivityTimer(roomId);
-  
-  // ✅ VÉRIFICATION : Case déjà remplie ?
-  if (player.grid[row][col] !== 0) {
-    console.log(`⚠️ Case (${row},${col}) déjà remplie avec ${player.grid[row][col]}`);
-    // ❌ Renvoyer une erreur au client pour qu'il ne compte pas ce coup
-    socket.emit('move_rejected', {
-      reason: 'cell_already_filled',
-      row, col, value
-    });
-    return;
-  }
-  
-  // ✅ Valider avec la solution
-  const correctValue = player.solution[row][col];
-  const isCorrect = (value === correctValue);
-  
-  console.log(`🎯 ${player.playerName} (${row},${col}): ${value} vs ${correctValue} → ${isCorrect ? '✅' : '❌'}`);
-  
-  // ✅ Toujours remplir la grille (même si faux)
-  player.grid[row][col] = value;
-  player.progress = calculateProgress(player.grid);
-  
-  const elapsed = (Date.now() - room.startTime) / 1000;
-  
-  if (isCorrect) {
-    // ✅ BON COUP
-    player.correctMoves++;
-    player.combo++;
-    
-    // ⚡ ENERGY MODE POWERUP
-    if (room.gameMode === 'powerup' && player.combo % 5 === 0 && player.combo > 0) {
-      player.energy++;
-      console.log(`⚡⚡⚡ ${player.playerName} +1 ÉNERGIE (combo ${player.combo}) → Total: ${player.energy}`);
-      
-      // ✅ Confirmer au client l'énergie gagnée
-      socket.emit('energy_gained', {
-        energy: player.energy,
-        combo: player.combo
-      });
-    }
-    
-    console.log(`✅ ${player.playerName}: CORRECT | Combo: ${player.combo} | Progress: ${player.progress}/81`);
-    
-  } else {
-    // ❌ MAUVAIS COUP
-    player.errors++;
-    player.combo = 0; // Reset combo
-    console.log(`❌ ${player.playerName}: ERREUR | Combo reset | Errors: ${player.errors}`);
-  }
-  
-  // ✅ Calcul vitesse
-  player.speed = elapsed > 0 ? (player.correctMoves / elapsed) * 60 : 0;
-  player.lastMoveTime = Date.now();
-  
-  // ✅ ENVOYER AU CLIENT (confirmation move)
-  socket.emit('move_confirmed', {
-    row, col, value,
-    isCorrect,
-    progress: player.progress,
-    correctMoves: player.correctMoves,
-    errors: player.errors,
-    combo: player.combo,
-    energy: player.energy,
-    speed: Math.round(player.speed * 10) / 10
-  });
-  
-  // ✅ BROADCAST À L'ADVERSAIRE
-  const opponentSocketId = getOpponentSocketId(roomId, playerId);
-  if (opponentSocketId) {
-    io.to(opponentSocketId).emit('opponentProgress', {
-      progress: player.progress,
-      correctMoves: player.correctMoves,
-      errors: player.errors,
-      combo: player.combo,
-      speed: Math.round(player.speed * 10) / 10,
-      lastAction: isCorrect ? 'correct' : 'error',
-      timestamp: Date.now()
-    });
-  }
-  
-  // 🏆 VICTOIRE ?
-  if (player.progress === 81) {
-    room.status = 'finished';
-    
-    const opponentId = Object.keys(room.players).find(id => id !== playerId);
-    const opponent = room.players[opponentId];
-    
-    const winnerScore = calculateScore(player, elapsed);
-    const loserScore = calculateScore(opponent, elapsed);
-    
-    console.log(`🏆 ${player.playerName} GAGNE! ${winnerScore}pts (${room.gameMode})`);
-    
-    const result = {
-      winnerId: playerId,
-      winnerName: player.playerName,
-      winnerScore,
-      loserId: opponentId,
-      loserName: opponent.playerName,
-      loserScore,
-      reason: 'completed'
-    };
-    
-    io.to(player.socketId).emit('game_over', result);
-    io.to(opponent.socketId).emit('game_over', result);
-    
-    if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
-    
-    setTimeout(() => {
-      delete rooms[roomId];
-      console.log(`🗑️ Room ${roomId} supprimée`);
-    }, 5000);
-  }
-});
-  
- socket.on('trigger_power', (data) => {
-  const { roomId, playerId } = data;
-  
-  const room = rooms[roomId];
-  if (!room || room.gameMode !== 'powerup') {
-    console.log(`⚠️ Power-ups désactivés (room: ${!!room}, mode: ${room?.gameMode})`);
-    return;
-  }
-  
-  const player = room.players[playerId];
-  if (!player) {
-    console.log(`⚠️ Player introuvable`);
-    return;
-  }
-  
-  if (player.energy < 1) {
-    console.log(`⚠️ ${player.playerName} pas assez d'énergie (${player.energy})`);
-    socket.emit('power_failed', { reason: 'insufficient_energy' });
-    return;
-  }
-  
-  // ✅ Consommer l'énergie
-  player.energy--;
-  
-  // ✅ Power-ups disponibles
-  const powers = [
-    { type: 'fog', duration: 2000 },      // Brouillard
-    { type: 'stun', duration: 1500 },     // Étourdissement
-    { type: 'flash', duration: 1000 },    // Flash
-    { type: 'shake', duration: 1500 }     // Tremblement
-  ];
-  
-  const randomPower = powers[Math.floor(Math.random() * powers.length)];
-  
-  console.log(`⚡⚡⚡ ${player.playerName} utilise ${randomPower.type} (${player.energy} énergie restante)`);
-  
-  // ✅ Confirmer au joueur qui lance
-  socket.emit('power_used', {
-    type: randomPower.type,
-    energy: player.energy
-  });
-  
-  // ✅ Envoyer à l'adversaire
-  const opponentSocketId = getOpponentSocketId(roomId, playerId);
-  if (opponentSocketId) {
-    console.log(`📤 Envoi power ${randomPower.type} à l'adversaire (socket: ${opponentSocketId})`);
-    io.to(opponentSocketId).emit('powerup_triggered', {
-      type: randomPower.type,
-      duration: randomPower.duration
-    });
-  } else {
-    console.log(`❌ Adversaire introuvable`);
-  }
-});
-  
+  // ========== ✅ UPDATE PROGRESS (DEPUIS CLIENT) ==========
   socket.on('updateProgress', (data) => {
-    const { roomId, playerId, progress } = data;
+    const { roomId, playerId, progress, correctMoves, errors, combo, speed } = data;
     
     const room = rooms[roomId];
     if (!room) return;
@@ -455,8 +244,29 @@ socket.on('cell_played', (data) => {
     const player = room.players[playerId];
     if (!player) return;
     
-    player.progress = progress;
+    resetInactivityTimer(roomId);
     
+    // ✅ MISE À JOUR DES STATS
+    player.progress = progress;
+    player.correctMoves = correctMoves || player.correctMoves;
+    player.errors = errors || player.errors;
+    player.combo = combo || player.combo;
+    player.speed = speed || player.speed;
+    
+    // ⚡ ENERGY MODE POWERUP (tous les 5 combo)
+    if (room.gameMode === 'powerup' && combo > 0 && combo % 5 === 0) {
+      const previousEnergy = player.energy;
+      const expectedEnergy = Math.floor(combo / 5);
+      
+      if (expectedEnergy > previousEnergy) {
+        player.energy = expectedEnergy;
+        console.log(`⚡⚡⚡ ${player.playerName} ÉNERGIE +1 (combo ${combo}) → Total: ${player.energy}`);
+      }
+    }
+    
+    console.log(`📊 ${player.playerName} - Progress: ${progress}/81 | Combo: ${combo} | Energy: ${player.energy}`);
+    
+    // ✅ BROADCAST À L'ADVERSAIRE
     const opponentSocketId = getOpponentSocketId(roomId, playerId);
     if (opponentSocketId) {
       io.to(opponentSocketId).emit('opponentProgress', {
@@ -465,17 +275,86 @@ socket.on('cell_played', (data) => {
         errors: player.errors,
         combo: player.combo,
         speed: Math.round(player.speed * 10) / 10,
-        lastAction: '',
-        timestamp: Date.now()
+        lastAction: ''
+      });
+    }
+    
+    // 🏆 VICTOIRE ?
+    if (progress >= 81) {
+      room.status = 'finished';
+      
+      const opponentId = Object.keys(room.players).find(id => id !== playerId);
+      const opponent = room.players[opponentId];
+      
+      const elapsed = (Date.now() - room.startTime) / 1000;
+      const winnerScore = calculateScore(player, elapsed);
+      const loserScore = calculateScore(opponent, elapsed);
+      
+      console.log(`🏆 ${player.playerName} GAGNE! ${winnerScore}pts vs ${loserScore}pts`);
+      
+      const result = {
+        winnerId: playerId,
+        winnerName: player.playerName,
+        winnerScore,
+        loserId: opponentId,
+        loserName: opponent.playerName,
+        loserScore,
+        reason: 'completed'
+      };
+      
+      io.to(player.socketId).emit('game_over', result);
+      io.to(opponent.socketId).emit('game_over', result);
+      
+      if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
+      setTimeout(() => delete rooms[roomId], 5000);
+    }
+  });
+  
+  // ========== ⚡ TRIGGER POWER-UP ==========
+  socket.on('trigger_power', (data) => {
+    const { roomId, playerId } = data;
+    
+    const room = rooms[roomId];
+    if (!room || room.gameMode !== 'powerup') {
+      console.log(`⚠️ Power-ups désactivés`);
+      return;
+    }
+    
+    const player = room.players[playerId];
+    if (!player) return;
+    
+    if (player.energy < 1) {
+      console.log(`⚠️ ${player.playerName} pas assez d'énergie (${player.energy})`);
+      return;
+    }
+    
+    // ✅ CONSOMMER ÉNERGIE
+    player.energy--;
+    
+    const powers = [
+      { type: 'fog', duration: 2000 },
+      { type: 'stun', duration: 1500 },
+      { type: 'flash', duration: 1000 },
+      { type: 'shake', duration: 1500 }
+    ];
+    
+    const randomPower = powers[Math.floor(Math.random() * powers.length)];
+    
+    console.log(`⚡⚡⚡ ${player.playerName} → ${randomPower.type} (${player.energy} restant)`);
+    
+    // ✅ ENVOYER À L'ADVERSAIRE
+    const opponentSocketId = getOpponentSocketId(roomId, playerId);
+    if (opponentSocketId) {
+      console.log(`📤 Envoi power ${randomPower.type} → ${opponentSocketId}`);
+      io.to(opponentSocketId).emit('powerup_triggered', {
+        type: randomPower.type,
+        duration: randomPower.duration
       });
     }
   });
   
   socket.on('gameEnd', (data) => {
     const { roomId, playerId, score, timeInSeconds } = data;
-    const room = rooms[roomId];
-    if (!room) return;
-    
     console.log(`🏁 ${playerId}: ${score}pts en ${timeInSeconds}s`);
   });
   
@@ -515,7 +394,6 @@ socket.on('cell_played', (data) => {
         
         if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
         delete rooms[roomId];
-        console.log(`🗑️ Room ${roomId} supprimée (déco)`);
         break;
       }
     }
@@ -534,7 +412,7 @@ socket.on('cell_played', (data) => {
 app.get('/', (req, res) => {
   res.json({
     status: 'alive',
-    message: 'Sudoku Server is running',
+    message: 'Sudoku Server v6 - FINAL',
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString()
   });
@@ -552,8 +430,7 @@ app.get('/health', (req, res) => {
     memory: {
       heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + ' MB',
       heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + ' MB'
-    },
-    timestamp: new Date().toISOString()
+    }
   });
 });
 
@@ -562,16 +439,17 @@ app.get('/stats', (req, res) => {
     rooms: Object.keys(rooms).map(id => ({
       roomId: id,
       gameMode: rooms[id].gameMode,
-      players: Object.keys(rooms[id].players).length,
-      status: rooms[id].status,
-      uptime: Date.now() - rooms[id].startTime
+      players: Object.keys(rooms[id].players).map(pid => ({
+        name: rooms[id].players[pid].playerName,
+        progress: rooms[id].players[pid].progress,
+        combo: rooms[id].players[pid].combo,
+        energy: rooms[id].players[pid].energy
+      }))
     })),
     classicQueue: classicQueue.map(p => ({ name: p.playerName })),
     powerupQueue: powerupQueue.map(p => ({ name: p.playerName }))
   });
 });
-
-// ========== LOGS PÉRIODIQUES ==========
 
 setInterval(() => {
   console.log('📊 ========== STATS ==========');
@@ -579,17 +457,12 @@ setInterval(() => {
   console.log(`   Classic Queue: ${classicQueue.length}`);
   console.log(`   Power-Up Queue: ${powerupQueue.length}`);
   console.log(`   Players: ${Object.keys(connectedSockets).length}`);
-  console.log(`   Uptime: ${Math.round(process.uptime())}s`);
   console.log('==============================');
 }, 300000);
 
-// ========== DÉMARRAGE SERVEUR ==========
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Serveur Socket.io démarré sur le port ${PORT}`);
-  console.log(`🌐 Health check: http://localhost:${PORT}/health`);
+  console.log(`🚀 Serveur v6 FINAL sur port ${PORT}`);
+  console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
-
-
