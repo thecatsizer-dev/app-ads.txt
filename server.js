@@ -403,6 +403,53 @@ io.on('connection', (socket) => {
     const { roomId, playerId, score, timeInSeconds } = data;
     console.log(`🏁 ${playerId}: ${score}pts en ${timeInSeconds}s`);
   });
+
+  // ========== ✅ ABANDON VOLONTAIRE ==========
+socket.on('playerAbandoned', (data) => {
+  const { roomId, playerId } = data;
+  
+  const room = rooms[roomId];
+  if (!room) return;
+  
+  console.log(`🚪 ${room.players[playerId]?.playerName} ABANDONNE`);
+  
+  const opponentId = Object.keys(room.players).find(id => id !== playerId);
+  const opponent = room.players[opponentId];
+  const abandoned = room.players[playerId];
+  
+  if (opponent && abandoned) {
+    const elapsed = (Date.now() - room.startTime) / 1000;
+    const winnerScore = calculateScore(opponent, elapsed);
+    const loserScore = 0; // Perdant = 0 points
+    
+    const result = {
+      winnerId: opponentId,
+      winnerName: opponent.playerName,
+      winnerScore,
+      loserId: playerId,
+      loserName: abandoned.playerName,
+      loserScore,
+      reason: 'opponent_abandoned'
+    };
+    
+    // ✅ NOTIFIER LES DEUX
+    io.to(opponent.socketId).emit('game_over', result);
+    io.to(abandoned.socketId).emit('game_over', result);
+    
+    console.log(`🏆 ${opponent.playerName} gagne par abandon (${winnerScore}pts)`);
+  }
+  
+  // ✅ CLEANUP IMMÉDIAT
+  if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
+  
+  // ✅ ANNULER TIMEOUT RECONNEXION SI EXISTANT
+  if (disconnectedPlayers[playerId]) {
+    clearTimeout(disconnectedPlayers[playerId].timeout);
+    delete disconnectedPlayers[playerId];
+  }
+  
+  delete rooms[roomId];
+});
   
   socket.on('disconnect', () => {
     console.log('🔌 Déconnexion:', socket.id);
@@ -429,42 +476,37 @@ io.on('connection', (socket) => {
           roomId,
           timestamp: Date.now(),
           timeout: setTimeout(() => {
-            // ✅ APRÈS 30s, ABANDON DÉFINITIF
-            console.log(`⏰ ${disconnected.playerName} n'est pas revenu - ABANDON`);
-            
-            const opponentId = Object.keys(room.players).find(id => id !== disconnected.playerId);
-            const opponent = room.players[opponentId];
-            
-            if (opponent) {
-              const elapsed = (Date.now() - room.startTime) / 1000;
-              const winnerScore = calculateScore(opponent, elapsed);
-              const loserScore = calculateScore(disconnected, elapsed);
-              
-              const result = {
-                winnerId: opponentId,
-                winnerName: opponent.playerName,
-                winnerScore,
-                loserId: disconnected.playerId,
-                loserName: disconnected.playerName,
-                loserScore,
-                reason: 'opponent_abandoned'
-              };
-              
-              // ✅ NOTIFIER L'ADVERSAIRE (GAGNANT)
-              io.to(opponent.socketId).emit('game_over', result);
-              
-              // ✅ TENTER DE NOTIFIER LE JOUEUR DÉCONNECTÉ (si reconnecté entre temps)
-              const disconnectedSocket = connectedSockets[disconnected.playerId];
-              if (disconnectedSocket) {
-                io.to(disconnectedSocket).emit('game_over', result);
-              }
-            }
-            
-            // ✅ CLEANUP
-            if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
-            delete rooms[roomId];
-            delete disconnectedPlayers[disconnected.playerId];
-          }, RECONNECT_TIMEOUT) // 30 secondes
+  console.log(`⏰ ${disconnected.playerName} n'est pas revenu - ABANDON`);
+  
+  const opponentId = Object.keys(room.players).find(id => id !== disconnected.playerId);
+  const opponent = room.players[opponentId];
+  
+  if (opponent) {
+    const elapsed = (Date.now() - room.startTime) / 1000;
+    const winnerScore = calculateScore(opponent, elapsed);
+    const loserScore = 0;
+    
+    const result = {
+      winnerId: opponentId,
+      winnerName: opponent.playerName,
+      winnerScore,
+      loserId: disconnected.playerId,
+      loserName: disconnected.playerName,
+      loserScore,
+      reason: 'opponent_abandoned'
+    };
+    
+    // ✅ NOTIFIER ADVERSAIRE (GAGNANT)
+    io.to(opponent.socketId).emit('game_over', result);
+    
+    // ✅ NOTIFIER AUSSI "opponentDisconnected" POUR CLEANUP UI
+    io.to(opponent.socketId).emit('opponentDisconnected');
+  }
+  
+  if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
+  delete rooms[roomId];
+  delete disconnectedPlayers[disconnected.playerId];
+}, RECONNECT_TIMEOUT) // 30 secondes
         };
         
         // ✅ NOTIFIER ADVERSAIRE DE LA DÉCONNEXION TEMPORAIRE
@@ -554,3 +596,4 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
