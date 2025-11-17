@@ -165,50 +165,51 @@ io.on('connection', (socket) => {
   });
   
   socket.on('player_connected', (data) => {
-    const { playerId, playerName } = data;
+  const { playerId, playerName } = data;
+  
+  console.log(`📝 Enregistrement: ${playerName} (${playerId})`);
+  
+  connectedSockets[playerId] = socket.id;
+  
+  if (disconnectedPlayers[playerId]) {
+    const { roomId, timeout } = disconnectedPlayers[playerId];
+    const room = rooms[roomId];
     
-    console.log(`📝 Enregistrement: ${playerName} (${playerId})`);
-    
-    // ✅ ENREGISTRER D'ABORD
-    connectedSockets[playerId] = socket.id;
-    
-    // ✅ VÉRIFIER RECONNEXION APRÈS
-    if (disconnectedPlayers[playerId]) {
-      const { roomId, timeout } = disconnectedPlayers[playerId];
-      const room = rooms[roomId];
+    if (room) {
+      clearTimeout(timeout);
+      delete disconnectedPlayers[playerId];
       
-      if (room) {
-        clearTimeout(timeout);
-        delete disconnectedPlayers[playerId];
-        
-        room.players[playerId].socketId = socket.id;
-        
-        console.log(`✅ ${playerName} RECONNECTÉ à ${roomId}!`);
-        
-        const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
-        
-        // ✅ ENVOYER reconnection_dialog pour afficher le choix
-        socket.emit('reconnection_dialog', {
-          roomId,
-          gameMode: room.gameMode,
-          opponentName: opponent?.playerName || 'Adversaire'
+      room.players[playerId].socketId = socket.id;
+      
+      console.log(`✅ ${playerName} RECONNECTÉ à ${roomId}!`);
+      
+      const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
+      const player = room.players[playerId];
+      
+      // ✅ ENVOYER TOUTES LES DONNÉES NÉCESSAIRES
+      socket.emit('reconnection_dialog', {
+        roomId,
+        gameMode: room.gameMode,
+        opponentName: opponent?.playerName || 'Adversaire',
+        puzzle: player.grid,
+        myProgress: player.progress,
+        opponentProgress: opponent?.progress || 0
+      });
+      
+      const opponentSocketId = getOpponentSocketId(roomId, playerId);
+      if (opponentSocketId) {
+        io.to(opponentSocketId).emit('opponent_reconnected', {
+          playerName
         });
-        
-        const opponentSocketId = getOpponentSocketId(roomId, playerId);
-        if (opponentSocketId) {
-          io.to(opponentSocketId).emit('opponent_reconnected', {
-            playerName
-          });
-        }
-        
-        return;
       }
+      
+      return;
     }
-    
-    // ✅ CONFIRMER CONNEXION INITIALE
-    console.log(`✅ Joueur enregistré: ${playerName}`);
-    socket.emit('connection_confirmed', { success: true, playerId });
-  });
+  }
+  
+  console.log(`✅ Joueur enregistré: ${playerName}`);
+  socket.emit('connection_confirmed', { success: true, playerId });
+});
   
   socket.on('joinQueue', (data) => {
     const { playerId, playerName, gameMode } = data;
@@ -601,4 +602,5 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
