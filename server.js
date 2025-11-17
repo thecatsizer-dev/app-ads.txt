@@ -189,15 +189,24 @@ io.on('connection', (socket) => {
       const player = room.players[playerId];
       
       // ✅✅✅ ENVOYER LA SOLUTION AUSSI
-      socket.emit('reconnection_dialog', {
-        roomId,
-        gameMode: room.gameMode,
-        opponentName: opponent?.playerName || 'Adversaire',
-        puzzle: player.grid,
-        solution: player.solution, // ✅ NOUVEAU
-        myProgress: player.progress,
-        opponentProgress: opponent?.progress || 0
-      });
+     socket.emit('reconnection_dialog', {
+  roomId,
+  gameMode: room.gameMode,
+  opponentName: opponent?.playerName || 'Adversaire',
+  puzzle: player.grid,
+  solution: player.solution,
+  myProgress: player.progress,
+  opponentProgress: opponent?.progress || 0,
+  // ✅ AJOUT DES STATS COMPLÈTES
+  myStats: {
+    correctMoves: player.correctMoves,
+    errors: player.errors,
+    combo: player.combo,
+    energy: player.energy,
+    speed: player.speed
+  },
+  elapsedSeconds: Math.floor((Date.now() - room.startTime) / 1000) // ✅ CHRONO
+});
       
       const opponentSocketId = getOpponentSocketId(roomId, playerId);
       if (opponentSocketId) {
@@ -586,6 +595,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
