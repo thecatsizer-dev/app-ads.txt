@@ -181,12 +181,14 @@ io.on('connection', (socket) => {
       
       room.players[playerId].socketId = socket.id;
       
+      // ✅ RESET LE TIMER D'INACTIVITÉ À LA RECONNEXION
+      resetInactivityTimer(roomId);
+      
       console.log(`✅ ${playerName} RECONNECTÉ à ${roomId}!`);
       
       const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
       const player = room.players[playerId];
       
-      // ✅ ENVOYER TOUTES LES DONNÉES NÉCESSAIRES
       socket.emit('reconnection_dialog', {
         roomId,
         gameMode: room.gameMode,
@@ -574,6 +576,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
