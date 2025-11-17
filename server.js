@@ -176,11 +176,14 @@ io.on('connection', (socket) => {
         
         console.log(`✅ ${playerName} RECONNECTÉ!`);
         
-        // ✅ RENVOYER ÉTAT DU JEU
+        const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
+
         socket.emit('reconnected', {
           roomId,
+          gameMode: room.gameMode,
           gameState: room.players[playerId],
-          opponentName: Object.values(room.players).find(p => p.playerId !== playerId)?.playerName
+          opponentName: opponent?.playerName || 'Adversaire',
+          puzzle: room.players[playerId].grid
         });
         
         // ✅ NOTIFIER ADVERSAIRE
@@ -595,5 +598,6 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
