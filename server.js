@@ -438,34 +438,6 @@ io.on('connection', (socket) => {
     delete rooms[roomId];
   });
 
-  socket.on('request_game_state', (data) => {
-  const { roomId } = data;
-  const room = rooms[roomId];
-  
-  if (!room) {
-    console.log('⚠️ Room introuvable:', roomId);
-    return;
-  }
-  
-  // Trouver le joueur
-  const player = Object.values(room.players).find(p => p.socketId === socket.id);
-  if (!player) {
-    console.log('⚠️ Joueur introuvable dans room');
-    return;
-  }
-  
-  const opponentId = Object.keys(room.players).find(id => id !== player.playerId);
-  const opponent = room.players[opponentId];
-  
-  console.log(`📦 Envoi état du jeu à ${player.playerName}`);
-  
-  socket.emit('game_state_restored', {
-    puzzle: player.grid,
-    progress: player.progress,
-    opponentProgress: opponent?.progress || 0
-  });
-});
-  
   socket.on('disconnect', () => {
     console.log('🔌 Déconnexion:', socket.id);
     
@@ -602,5 +574,6 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
