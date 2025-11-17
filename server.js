@@ -377,6 +377,23 @@ io.on('connection', (socket) => {
     }
   });
   
+  socket.on('cell_played', (data) => {
+  const { roomId, playerId, row, col, value } = data;
+  
+  const room = rooms[roomId];
+  if (!room) return;
+  
+  const player = room.players[playerId];
+  if (!player) return;
+  
+  // ✅ METTRE À JOUR LA GRILLE
+  player.grid[row][col] = value;
+  
+  if (kDebugMode) {
+    console.log(`📝 ${player.playerName} place ${value} en [${row}][${col}]`);
+  }
+});
+  
   socket.on('trigger_power', (data) => {
     const { roomId, playerId } = data;
     
@@ -600,6 +617,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
