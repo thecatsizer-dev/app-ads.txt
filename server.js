@@ -389,9 +389,6 @@ io.on('connection', (socket) => {
   // ✅ METTRE À JOUR LA GRILLE
   player.grid[row][col] = value;
   
-  if (kDebugMode) {
-    console.log(`📝 ${player.playerName} place ${value} en [${row}][${col}]`);
-  }
 });
   
   socket.on('trigger_power', (data) => {
@@ -617,6 +614,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
