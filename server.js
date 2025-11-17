@@ -36,7 +36,7 @@ const connectedSockets = {};
 const disconnectedPlayers = {}; // ✅ NOUVEAU: Pour reconnexion
 
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000;
-const RECONNECT_TIMEOUT = 30000; // 30 secondes
+const RECONNECT_TIMEOUT = 60000; // 60 secondes
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -598,6 +598,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
