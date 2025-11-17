@@ -1,4 +1,4 @@
-// server.js - BACKEND SOCKET.IO PRODUCTION READY v8 - CONNECTION FIX
+// server.js - BACKEND SOCKET.IO PRODUCTION READY v9 - FINAL FIX
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -35,8 +35,8 @@ const powerupQueue = [];
 const connectedSockets = {};
 const disconnectedPlayers = {}; // Pour reconnexion
 
-const INACTIVITY_TIMEOUT = 5 * 60 * 1000;
-const RECONNECT_TIMEOUT = 60000; // 60 secondes
+const INACTIVITY_TIMEOUT = 3 * 60 * 1000; // ✅ 3 MINUTES
+const RECONNECT_TIMEOUT = 60000; // ✅ 60 SECONDES (1 minute)
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -120,26 +120,40 @@ function getSolution() {
   ];
 }
 
+// ✅ TIMER INACTIVITÉ (3 MINUTES SANS MOUVEMENT)
 function setupInactivityTimer(roomId) {
   const room = rooms[roomId];
   if (!room) return;
   
+  if (room.inactivityTimer) {
+    clearTimeout(room.inactivityTimer);
+  }
+  
   room.inactivityTimer = setTimeout(() => {
-    console.log(`⏰ Timeout inactivité - Room ${roomId}`);
+    console.log(`⏰ INACTIVITÉ 3min - Room ${roomId}`);
     
-    Object.values(room.players).forEach(player => {
-      io.to(player.socketId).emit('game_over', {
-        winnerId: null,
-        winnerName: null,
-        winnerScore: 0,
-        loserId: null,
-        loserName: null,
-        loserScore: 0,
-        reason: 'inactivity'
-      });
+    const players = Object.values(room.players);
+    if (players.length !== 2) return;
+    
+    // ✅ GAME OVER PAR INACTIVITÉ (match nul)
+    const result = {
+      winnerId: null,
+      winnerName: null,
+      winnerScore: 0,
+      loserId: null,
+      loserName: null,
+      loserScore: 0,
+      reason: 'inactivity'
+    };
+    
+    players.forEach(player => {
+      io.to(player.socketId).emit('game_over', result);
     });
     
+    if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
     delete rooms[roomId];
+    
+    console.log(`🏁 Partie terminée par inactivité`);
   }, INACTIVITY_TIMEOUT);
 }
 
@@ -158,145 +172,138 @@ function resetInactivityTimer(roomId) {
 io.on('connection', (socket) => {
   console.log('🔌 Client connecté:', socket.id);
   
-  // ✅ RÉPONDRE IMMÉDIATEMENT À LA CONNEXION
   socket.emit('connection_established', { 
     socketId: socket.id,
     timestamp: Date.now() 
   });
   
- socket.on('player_connected', (data) => {
-  const { playerId, playerName } = data;
-  
-  console.log(`📝 Enregistrement: ${playerName} (${playerId})`);
-  
-  connectedSockets[playerId] = socket.id;
-  
-  // ✅ RECONNEXION DÉTECTÉE
-  if (disconnectedPlayers[playerId]) {
-    const { roomId, timeout } = disconnectedPlayers[playerId];
-    const room = rooms[roomId];
+  socket.on('player_connected', (data) => {
+    const { playerId, playerName } = data;
     
-    if (room && room.players[playerId]) {
-      clearTimeout(timeout);
-      delete disconnectedPlayers[playerId];
+    console.log(`📝 Enregistrement: ${playerName} (${playerId})`);
+    
+    connectedSockets[playerId] = socket.id;
+    
+    // ✅ RECONNEXION DÉTECTÉE
+    if (disconnectedPlayers[playerId]) {
+      const { roomId, timeout } = disconnectedPlayers[playerId];
+      const room = rooms[roomId];
       
-      room.players[playerId].socketId = socket.id;
-      resetInactivityTimer(roomId);
+      if (room && room.players[playerId]) {
+        clearTimeout(timeout);
+        delete disconnectedPlayers[playerId];
+        
+        room.players[playerId].socketId = socket.id;
+        resetInactivityTimer(roomId);
+        
+        console.log(`✅ ${playerName} RECONNECTÉ à ${roomId}!`);
+        
+        const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
+        const player = room.players[playerId];
+        
+        socket.emit('reconnection_dialog', {
+          roomId,
+          gameMode: room.gameMode,
+          opponentName: opponent?.playerName || 'Adversaire',
+          puzzle: player.grid,
+          initialPuzzle: room.initialPuzzle,
+          solution: player.solution,
+          myProgress: player.progress,
+          opponentProgress: opponent?.progress || 0,
+          myStats: {
+            correctMoves: player.correctMoves,
+            errors: player.errors,
+            combo: player.combo,
+            energy: player.energy,
+            speed: player.speed
+          },
+          elapsedSeconds: Math.floor((Date.now() - room.startTime) / 1000)
+        });
+        
+        const opponentSocketId = getOpponentSocketId(roomId, playerId);
+        if (opponentSocketId) {
+          io.to(opponentSocketId).emit('opponent_reconnected', { playerName });
+        }
+        
+        return;
+      }
+    }
+    
+    console.log(`✅ Joueur enregistré: ${playerName}`);
+    socket.emit('connection_confirmed', { success: true, playerId });
+  });
+  
+  socket.on('joinQueue', (data) => {
+    const { playerId, playerName, gameMode } = data;
+    console.log(`🔍 ${playerName} recherche en ${gameMode}...`);
+    
+    const queue = gameMode === 'classic' ? classicQueue : powerupQueue;
+    
+    if (queue.find(p => p.playerId === playerId)) {
+      console.log(`⚠️ Déjà en queue`);
+      return;
+    }
+    
+    if (queue.length > 0) {
+      const opponent = queue.shift();
+      const roomId = generateRoomId();
+      const puzzle = generateSudokuPuzzle('medium');
+      const solution = getSolution();
       
-      console.log(`✅ ${playerName} RECONNECTÉ à ${roomId}!`);
+      const frozenInitialPuzzle = JSON.parse(JSON.stringify(puzzle));
       
-      const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
-      const player = room.players[playerId];
-      
-      // ✅ ENVOYER **TOUTES** LES DONNÉES NÉCESSAIRES
-      socket.emit('reconnection_dialog', {
+      rooms[roomId] = {
         roomId,
-        gameMode: room.gameMode,
-        opponentName: opponent?.playerName || 'Adversaire',
-        puzzle: player.grid,              // ✅ Grille actuelle (avec chiffres placés)
-        initialPuzzle: room.initialPuzzle, // ✅ Grille de départ (pour fixedCells)
-        solution: player.solution,
-        myProgress: player.progress,
-        opponentProgress: opponent?.progress || 0,
-        myStats: {
-          correctMoves: player.correctMoves,
-          errors: player.errors,
-          combo: player.combo,
-          energy: player.energy,
-          speed: player.speed
+        gameMode,
+        initialPuzzle: frozenInitialPuzzle,
+        players: {
+          [playerId]: {
+            playerId, playerName,
+            socketId: socket.id,
+            grid: JSON.parse(JSON.stringify(puzzle)),
+            solution: JSON.parse(JSON.stringify(solution)),
+            correctMoves: 0, errors: 0, combo: 0, energy: 0,
+            progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+          },
+          [opponent.playerId]: {
+            playerId: opponent.playerId,
+            playerName: opponent.playerName,
+            socketId: opponent.socketId,
+            grid: JSON.parse(JSON.stringify(puzzle)),
+            solution: JSON.parse(JSON.stringify(solution)),
+            correctMoves: 0, errors: 0, combo: 0, energy: 0,
+            progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+          }
         },
-        elapsedSeconds: Math.floor((Date.now() - room.startTime) / 1000) // ✅ TEMPS RÉEL
+        status: 'playing',
+        startTime: Date.now()
+      };
+      
+      setupInactivityTimer(roomId);
+      
+      console.log(`🎮 Match ${gameMode}: ${playerName} vs ${opponent.playerName}`);
+      
+      io.to(socket.id).emit('matchFound', {
+        roomId, 
+        opponentName: opponent.playerName, 
+        puzzle, 
+        solution,
+        gameMode
+      });
+      io.to(opponent.socketId).emit('matchFound', {
+        roomId, 
+        opponentName: playerName, 
+        puzzle, 
+        solution,
+        gameMode
       });
       
-      // Notifier l'adversaire
-      const opponentSocketId = getOpponentSocketId(roomId, playerId);
-      if (opponentSocketId) {
-        io.to(opponentSocketId).emit('opponent_reconnected', { playerName });
-      }
-      
-      return; // ✅ STOP ICI - Ne pas émettre connection_confirmed
+    } else {
+      queue.push({ playerId, playerName, socketId: socket.id });
+      socket.emit('waiting');
+      console.log(`⏳ ${playerName} en attente (${gameMode})`);
     }
-  }
-  
-  // ✅ PREMIÈRE CONNEXION (pas de partie en cours)
-  console.log(`✅ Joueur enregistré: ${playerName}`);
-  socket.emit('connection_confirmed', { success: true, playerId });
-});
-  
-  // LIGNE 227-268 - Remplacer tout le bloc par:
-
-  socket.on('joinQueue', (data) => {
-  const { playerId, playerName, gameMode } = data;
-  console.log(`🔍 ${playerName} recherche en ${gameMode}...`);
-  
-  const queue = gameMode === 'classic' ? classicQueue : powerupQueue;
-  
-  if (queue.find(p => p.playerId === playerId)) {
-    console.log(`⚠️ Déjà en queue`);
-    return;
-  }
-  
-  if (queue.length > 0) {
-    const opponent = queue.shift();
-    const roomId = generateRoomId();
-    const puzzle = generateSudokuPuzzle('medium');
-    const solution = getSolution();
-    
-    // ✅ SAUVEGARDER LA GRILLE INITIALE UNE SEULE FOIS
-    const frozenInitialPuzzle = JSON.parse(JSON.stringify(puzzle)); // ✅ FREEZE
-    
-    rooms[roomId] = {
-      roomId,
-      gameMode,
-      initialPuzzle: frozenInitialPuzzle, // ✅ NE JAMAIS MODIFIER
-      players: {
-        [playerId]: {
-          playerId, playerName,
-          socketId: socket.id,
-          grid: JSON.parse(JSON.stringify(puzzle)),
-          solution: JSON.parse(JSON.stringify(solution)),
-          correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
-        },
-        [opponent.playerId]: {
-          playerId: opponent.playerId,
-          playerName: opponent.playerName,
-          socketId: opponent.socketId,
-          grid: JSON.parse(JSON.stringify(puzzle)),
-          solution: JSON.parse(JSON.stringify(solution)),
-          correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
-        }
-      },
-      status: 'playing',
-      startTime: Date.now()
-    };
-    
-    setupInactivityTimer(roomId);
-    
-    console.log(`🎮 Match ${gameMode}: ${playerName} vs ${opponent.playerName}`);
-    
-    io.to(socket.id).emit('matchFound', {
-      roomId, 
-      opponentName: opponent.playerName, 
-      puzzle, 
-      solution,
-      gameMode
-    });
-    io.to(opponent.socketId).emit('matchFound', {
-      roomId, 
-      opponentName: playerName, 
-      puzzle, 
-      solution,
-      gameMode
-    });
-    
-  } else {
-    queue.push({ playerId, playerName, socketId: socket.id });
-    socket.emit('waiting');
-    console.log(`⏳ ${playerName} en attente (${gameMode})`);
-  }
-});
+  });
   
   socket.on('leaveQueue', () => {
     [classicQueue, powerupQueue].forEach((queue, idx) => {
@@ -317,6 +324,7 @@ io.on('connection', (socket) => {
     const player = room.players[playerId];
     if (!player) return;
     
+    // ✅ RESET TIMER À CHAQUE MOUVEMENT
     resetInactivityTimer(roomId);
     
     player.progress = progress;
@@ -378,18 +386,19 @@ io.on('connection', (socket) => {
   });
   
   socket.on('cell_played', (data) => {
-  const { roomId, playerId, row, col, value } = data;
-  
-  const room = rooms[roomId];
-  if (!room) return;
-  
-  const player = room.players[playerId];
-  if (!player) return;
-  
-  // ✅ METTRE À JOUR LA GRILLE
-  player.grid[row][col] = value;
-  
-});
+    const { roomId, playerId, row, col, value } = data;
+    
+    const room = rooms[roomId];
+    if (!room) return;
+    
+    const player = room.players[playerId];
+    if (!player) return;
+    
+    player.grid[row][col] = value;
+    
+    // ✅ RESET TIMER À CHAQUE COUP
+    resetInactivityTimer(roomId);
+  });
   
   socket.on('trigger_power', (data) => {
     const { roomId, playerId } = data;
@@ -436,19 +445,22 @@ io.on('connection', (socket) => {
     console.log(`🏁 ${playerId}: ${score}pts en ${timeInSeconds}s`);
   });
 
+  // ✅ ABANDON DEPUIS LE JEU OU LE SALON
   socket.on('playerAbandoned', (data) => {
     const { roomId, playerId } = data;
     
     const room = rooms[roomId];
     if (!room) return;
     
-    console.log(`🚪 ${room.players[playerId]?.playerName} ABANDONNE`);
+    const abandoned = room.players[playerId];
+    if (!abandoned) return;
+    
+    console.log(`🚪 ${abandoned.playerName} ABANDONNE`);
     
     const opponentId = Object.keys(room.players).find(id => id !== playerId);
     const opponent = room.players[opponentId];
-    const abandoned = room.players[playerId];
     
-    if (opponent && abandoned) {
+    if (opponent) {
       const elapsed = (Date.now() - room.startTime) / 1000;
       const winnerScore = calculateScore(opponent, elapsed);
       
@@ -462,6 +474,7 @@ io.on('connection', (socket) => {
         reason: 'opponent_abandoned'
       };
       
+      // ✅ ENVOYER AUX DEUX (que ce soit en jeu ou salon)
       io.to(opponent.socketId).emit('game_over', result);
       io.to(abandoned.socketId).emit('game_over', result);
       
@@ -478,6 +491,7 @@ io.on('connection', (socket) => {
     delete rooms[roomId];
   });
 
+  // ✅ DÉCONNEXION (60 SECONDES POUR SE RECONNECTER)
   socket.on('disconnect', () => {
     console.log('🔌 Déconnexion:', socket.id);
     
@@ -494,13 +508,13 @@ io.on('connection', (socket) => {
       const disconnected = Object.values(room.players).find(p => p.socketId === socket.id);
       
       if (disconnected) {
-        console.log(`⚠️ ${disconnected.playerName} déco - ATTENTE 30s`);
+        console.log(`⚠️ ${disconnected.playerName} déco - ATTENTE 60s`);
         
         disconnectedPlayers[disconnected.playerId] = {
           roomId,
           timestamp: Date.now(),
           timeout: setTimeout(() => {
-            console.log(`⏰ ${disconnected.playerName} n'est pas revenu`);
+            console.log(`⏰ ${disconnected.playerName} n'est pas revenu après 60s`);
             
             const opponentId = Object.keys(room.players).find(id => id !== disconnected.playerId);
             const opponent = room.players[opponentId];
@@ -520,13 +534,12 @@ io.on('connection', (socket) => {
               };
               
               io.to(opponent.socketId).emit('game_over', result);
-              io.to(opponent.socketId).emit('opponentDisconnected');
             }
             
             if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
             delete rooms[roomId];
             delete disconnectedPlayers[disconnected.playerId];
-          }, RECONNECT_TIMEOUT)
+          }, RECONNECT_TIMEOUT) // ✅ 60 SECONDES
         };
         
         const opponentId = Object.keys(room.players).find(id => id !== disconnected.playerId);
@@ -535,7 +548,7 @@ io.on('connection', (socket) => {
         if (opponentSocketId) {
           io.to(opponentSocketId).emit('opponent_disconnected_temp', {
             playerName: disconnected.playerName,
-            waitTime: 30
+            waitTime: 60 // ✅ 60 secondes
           });
         }
         
@@ -557,7 +570,7 @@ io.on('connection', (socket) => {
 app.get('/', (req, res) => {
   res.json({
     status: 'alive',
-    message: 'Sudoku Server v8 - CONNECTION FIX',
+    message: 'Sudoku Server v9 - FINAL FIX',
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString()
   });
@@ -610,21 +623,7 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Serveur v8 CONNECTION FIX sur port ${PORT}`);
+  console.log(`🚀 Serveur v9 FINAL FIX sur port ${PORT}`);
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
