@@ -223,6 +223,8 @@ io.on('connection', (socket) => {
   socket.emit('connection_confirmed', { success: true, playerId });
 });
   
+  // LIGNE 227-268 - Remplacer tout le bloc par:
+
   socket.on('joinQueue', (data) => {
   const { playerId, playerName, gameMode } = data;
   console.log(`🔍 ${playerName} recherche en ${gameMode}...`);
@@ -238,53 +240,51 @@ io.on('connection', (socket) => {
     const opponent = queue.shift();
     const roomId = generateRoomId();
     const puzzle = generateSudokuPuzzle('medium');
-    const solution = getSolution(); // ✅ GÉNÈRE LA SOLUTION COMPLÈTE
+    const solution = getSolution();
     
     rooms[roomId] = {
-     rooms[roomId] = {
-  roomId,
-  gameMode,
-  initialPuzzle: JSON.parse(JSON.stringify(puzzle)), // ✅ AJOUTER CETTE LIGNE
-  players: {
-    [playerId]: {
-      playerId, playerName,
-      socketId: socket.id,
-      grid: JSON.parse(JSON.stringify(puzzle)),
-      solution: JSON.parse(JSON.stringify(solution)),
-      correctMoves: 0, errors: 0, combo: 0, energy: 0,
-      progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
-    },
-    [opponent.playerId]: {
-      playerId: opponent.playerId,
-      playerName: opponent.playerName,
-      socketId: opponent.socketId,
-      grid: JSON.parse(JSON.stringify(puzzle)),
-      solution: JSON.parse(JSON.stringify(solution)),
-      correctMoves: 0, errors: 0, combo: 0, energy: 0,
-      progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
-    }
-  },
-  status: 'playing',
-  startTime: Date.now()
-};
+      roomId,
+      gameMode,
+      initialPuzzle: JSON.parse(JSON.stringify(puzzle)),
+      players: {
+        [playerId]: {
+          playerId, playerName,
+          socketId: socket.id,
+          grid: JSON.parse(JSON.stringify(puzzle)),
+          solution: JSON.parse(JSON.stringify(solution)),
+          correctMoves: 0, errors: 0, combo: 0, energy: 0,
+          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+        },
+        [opponent.playerId]: {
+          playerId: opponent.playerId,
+          playerName: opponent.playerName,
+          socketId: opponent.socketId,
+          grid: JSON.parse(JSON.stringify(puzzle)),
+          solution: JSON.parse(JSON.stringify(solution)),
+          correctMoves: 0, errors: 0, combo: 0, energy: 0,
+          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+        }
+      },
+      status: 'playing',
+      startTime: Date.now()
+    };
     
     setupInactivityTimer(roomId);
     
     console.log(`🎮 Match ${gameMode}: ${playerName} vs ${opponent.playerName}`);
     
-    // ✅✅✅ ENVOYER AUSSI LA SOLUTION AUX CLIENTS
     io.to(socket.id).emit('matchFound', {
       roomId, 
       opponentName: opponent.playerName, 
       puzzle, 
-      solution, // ✅ NOUVEAU
+      solution,
       gameMode
     });
     io.to(opponent.socketId).emit('matchFound', {
       roomId, 
       opponentName: playerName, 
       puzzle, 
-      solution, // ✅ NOUVEAU
+      solution,
       gameMode
     });
     
@@ -597,6 +597,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
