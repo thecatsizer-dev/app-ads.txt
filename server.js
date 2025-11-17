@@ -189,11 +189,11 @@ io.on('connection', (socket) => {
       const player = room.players[playerId];
       
       // ✅✅✅ ENVOYER LA SOLUTION AUSSI
-   socket.emit('reconnection_dialog', {
+  socket.emit('reconnection_dialog', {
   roomId,
   gameMode: room.gameMode,
   opponentName: opponent?.playerName || 'Adversaire',
-  puzzle: player.grid, // Grille actuelle
+  puzzle: player.grid, // ✅ Grille actuelle
   initialPuzzle: room.initialPuzzle, // ✅ AJOUTER - Grille de départ
   solution: player.solution,
   myProgress: player.progress,
@@ -241,31 +241,32 @@ io.on('connection', (socket) => {
     const solution = getSolution(); // ✅ GÉNÈRE LA SOLUTION COMPLÈTE
     
     rooms[roomId] = {
-      roomId,
-      gameMode,
-      initialPuzzle: JSON.parse(JSON.stringify(puzzle)), // ✅ SAUVEGARDER
-      players: {
-        [playerId]: {
-          playerId, playerName,
-          socketId: socket.id,
-          grid: JSON.parse(JSON.stringify(puzzle)),
-          solution: JSON.parse(JSON.stringify(solution)), // ✅ VRAIE SOLUTION
-          correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
-        },
-        [opponent.playerId]: {
-          playerId: opponent.playerId,
-          playerName: opponent.playerName,
-          socketId: opponent.socketId,
-          grid: JSON.parse(JSON.stringify(puzzle)),
-          solution: JSON.parse(JSON.stringify(solution)), // ✅ VRAIE SOLUTION
-          correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
-        }
-      },
-      status: 'playing',
-      startTime: Date.now()
-    };
+     rooms[roomId] = {
+  roomId,
+  gameMode,
+  initialPuzzle: JSON.parse(JSON.stringify(puzzle)), // ✅ AJOUTER CETTE LIGNE
+  players: {
+    [playerId]: {
+      playerId, playerName,
+      socketId: socket.id,
+      grid: JSON.parse(JSON.stringify(puzzle)),
+      solution: JSON.parse(JSON.stringify(solution)),
+      correctMoves: 0, errors: 0, combo: 0, energy: 0,
+      progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+    },
+    [opponent.playerId]: {
+      playerId: opponent.playerId,
+      playerName: opponent.playerName,
+      socketId: opponent.socketId,
+      grid: JSON.parse(JSON.stringify(puzzle)),
+      solution: JSON.parse(JSON.stringify(solution)),
+      correctMoves: 0, errors: 0, combo: 0, energy: 0,
+      progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+    }
+  },
+  status: 'playing',
+  startTime: Date.now()
+};
     
     setupInactivityTimer(roomId);
     
@@ -596,6 +597,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
