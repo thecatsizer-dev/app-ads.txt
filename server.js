@@ -189,15 +189,15 @@ io.on('connection', (socket) => {
       const player = room.players[playerId];
       
       // ✅✅✅ ENVOYER LA SOLUTION AUSSI
-     socket.emit('reconnection_dialog', {
+   socket.emit('reconnection_dialog', {
   roomId,
   gameMode: room.gameMode,
   opponentName: opponent?.playerName || 'Adversaire',
-  puzzle: player.grid,
+  puzzle: player.grid, // Grille actuelle
+  initialPuzzle: room.initialPuzzle, // ✅ AJOUTER - Grille de départ
   solution: player.solution,
   myProgress: player.progress,
   opponentProgress: opponent?.progress || 0,
-  // ✅ AJOUT DES STATS COMPLÈTES
   myStats: {
     correctMoves: player.correctMoves,
     errors: player.errors,
@@ -205,7 +205,7 @@ io.on('connection', (socket) => {
     energy: player.energy,
     speed: player.speed
   },
-  elapsedSeconds: Math.floor((Date.now() - room.startTime) / 1000) // ✅ CHRONO
+  elapsedSeconds: Math.floor((Date.now() - room.startTime) / 1000)
 });
       
       const opponentSocketId = getOpponentSocketId(roomId, playerId);
@@ -243,6 +243,7 @@ io.on('connection', (socket) => {
     rooms[roomId] = {
       roomId,
       gameMode,
+      initialPuzzle: JSON.parse(JSON.stringify(puzzle)), // ✅ SAUVEGARDER
       players: {
         [playerId]: {
           playerId, playerName,
@@ -595,6 +596,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
