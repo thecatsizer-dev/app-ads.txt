@@ -242,10 +242,13 @@ io.on('connection', (socket) => {
     const puzzle = generateSudokuPuzzle('medium');
     const solution = getSolution();
     
+    // ✅ SAUVEGARDER LA GRILLE INITIALE UNE SEULE FOIS
+    const frozenInitialPuzzle = JSON.parse(JSON.stringify(puzzle)); // ✅ FREEZE
+    
     rooms[roomId] = {
       roomId,
       gameMode,
-      initialPuzzle: JSON.parse(JSON.stringify(puzzle)),
+      initialPuzzle: frozenInitialPuzzle, // ✅ NE JAMAIS MODIFIER
       players: {
         [playerId]: {
           playerId, playerName,
@@ -597,6 +600,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
