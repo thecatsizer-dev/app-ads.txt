@@ -187,12 +187,11 @@ io.on('connection', (socket) => {
         
         const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
         
-        // ✅ ENVOYER reconnected (pas dialog) pour restaurer l'état
-        socket.emit('reconnected', {
+        // ✅ ENVOYER reconnection_dialog pour afficher le choix
+        socket.emit('reconnection_dialog', {
           roomId,
           gameMode: room.gameMode,
-          opponentName: opponent?.playerName || 'Adversaire',
-          puzzle: room.players[playerId].grid
+          opponentName: opponent?.playerName || 'Adversaire'
         });
         
         const opponentSocketId = getOpponentSocketId(roomId, playerId);
