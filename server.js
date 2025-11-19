@@ -629,6 +629,19 @@ io.on('connection', (socket) => {
       }
     }
   });
+
+  socket.on('heartbeat', (data) => {
+  const { roomId, playerId } = data;
+  
+  const room = rooms[roomId];
+  if (!room) return;
+  
+  const player = room.players[playerId];
+  if (!player) return;
+  
+  // ✅ RESET LE TIMER SANS LOG (sinon spam)
+  resetPlayerInactivityTimer(roomId, playerId);
+});
   
   socket.on('gameEnd', (data) => {
     const { roomId, playerId, score, timeInSeconds } = data;
@@ -888,3 +901,4 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
