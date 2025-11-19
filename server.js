@@ -163,19 +163,52 @@ function setupInactivityTimer(roomId) {
     const players = Object.values(room.players);
     if (players.length !== 2) return;
     
-    const result = {
-      winnerId: null,
-      winnerName: null,
-      winnerScore: 0,
-      loserId: null,
-      loserName: null,
-      loserScore: 0,
+    const elapsed = (Date.now() - room.startTime) / 1000;
+    
+    // ✅ DÉTERMINER QUI EST INACTIF (celui avec lastMoveTime le plus ancien)
+    let inactivePlayer, activePlayer;
+    
+    if (players[0].lastMoveTime < players[1].lastMoveTime) {
+      inactivePlayer = players[0];
+      activePlayer = players[1];
+    } else {
+      inactivePlayer = players[1];
+      activePlayer = players[0];
+    }
+    
+    // ✅ CALCUL SCORES
+    const fullScore = calculateScore(activePlayer, elapsed);
+    const winnerScore = Math.floor(fullScore * 0.25); // 25% du score normal
+    const loserScore = 0;
+    
+    console.log(`🏆 ${activePlayer.playerName} gagne par inactivité de ${inactivePlayer.playerName}`);
+    console.log(`   Score réduit: ${winnerScore} (25% de ${fullScore})`);
+    
+    // ✅ RÉSULTAT GAGNANT
+    const resultWinner = {
+      winnerId: activePlayer.playerId,
+      winnerName: activePlayer.playerName,
+      winnerScore,
+      loserId: inactivePlayer.playerId,
+      loserName: inactivePlayer.playerName,
+      loserScore,
       reason: 'inactivity'
     };
     
-    players.forEach(player => {
-      io.to(player.socketId).emit('game_over', result);
-    });
+    // ✅ RÉSULTAT PERDANT
+    const resultLoser = {
+      winnerId: activePlayer.playerId,
+      winnerName: activePlayer.playerName,
+      winnerScore,
+      loserId: inactivePlayer.playerId,
+      loserName: inactivePlayer.playerName,
+      loserScore,
+      reason: 'inactivity'
+    };
+    
+    // ✅ ENVOYER À CHACUN
+    io.to(activePlayer.socketId).emit('game_over', resultWinner);
+    io.to(inactivePlayer.socketId).emit('game_over', resultLoser);
     
     if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
     delete rooms[roomId];
@@ -763,3 +796,4 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
