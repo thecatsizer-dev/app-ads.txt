@@ -149,6 +149,8 @@ function getSolution() {
 }
 
 // ✅✅✅ NOUVEAU - TIMER INDIVIDUEL PAR JOUEUR
+// ========== LIGNE ~195 - REMPLACER setupPlayerInactivityTimer ==========
+
 function setupPlayerInactivityTimer(roomId, playerId) {
   const room = rooms[roomId];
   if (!room) return;
@@ -156,16 +158,13 @@ function setupPlayerInactivityTimer(roomId, playerId) {
   const player = room.players[playerId];
   if (!player) return;
   
-  // ✅ CLEAR ancien timer du joueur
   if (player.inactivityTimer) {
     clearTimeout(player.inactivityTimer);
   }
   
-  // ✅ NOUVEAU TIMER PERSONNEL (3 MIN)
   player.inactivityTimer = setTimeout(() => {
     console.log(`⏰ INACTIVITÉ 3min - ${player.playerName} dans ${roomId}`);
     
-    // ✅ VÉRIFIER SI ROOM EXISTE TOUJOURS
     if (!rooms[roomId]) return;
     
     const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
@@ -173,14 +172,12 @@ function setupPlayerInactivityTimer(roomId, playerId) {
     
     const elapsed = Math.floor((Date.now() - room.startTime) / 1000);
     
-    // ✅ CALCUL SCORES
-    const opponentScore = 2500; // 🎁 BONUS VICTOIRE SANS JOUER
+    const opponentScore = 2500;
     const inactiveScore = 0;
     
     console.log(`🏆 ${opponent.playerName} GAGNE par inactivité de ${player.playerName}`);
     console.log(`   Score gagnant: ${opponentScore} pts (bonus AFK)`);
     
-    // ✅ RÉSULTAT
     const result = {
       winnerId: opponent.playerId,
       winnerName: opponent.playerName,
@@ -191,19 +188,34 @@ function setupPlayerInactivityTimer(roomId, playerId) {
       reason: 'inactivity'
     };
     
-    // ✅ ENVOYER GAME_OVER
+    // ✅✅✅ MARQUER LA ROOM COMME TERMINÉE
+    room.status = 'finished';
+    
+    // ✅✅✅ ENVOYER GAME_OVER (même si socket déconnecté temporairement)
     io.to(opponent.socketId).emit('game_over', result);
     io.to(player.socketId).emit('game_over', result);
+    
+    // ✅✅✅ FORCER LA DÉCONNEXION DES 2 SOCKETS
+    const opponentSocket = io.sockets.sockets.get(opponent.socketId);
+    const playerSocket = io.sockets.sockets.get(player.socketId);
+    
+    if (opponentSocket) {
+      opponentSocket.emit('force_leave_room', { reason: 'inactivity', result });
+    }
+    if (playerSocket) {
+      playerSocket.emit('force_leave_room', { reason: 'inactivity', result });
+    }
     
     // ✅ CLEANUP TOUS LES TIMERS
     Object.values(room.players).forEach(p => {
       if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
     });
     
+    // ✅✅✅ SUPPRIMER LA ROOM IMMÉDIATEMENT
     delete rooms[roomId];
-    console.log(`🏁 Partie terminée par inactivité de ${player.playerName}`);
+    console.log(`🏁 Room ${roomId} supprimée (inactivité)`);
     
-  }, INACTIVITY_TIMEOUT); // 3 MINUTES
+  }, INACTIVITY_TIMEOUT);
   
   console.log(`⏱️ Timer inactivité démarré pour ${player.playerName}`);
 }
@@ -819,3 +831,4 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
