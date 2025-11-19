@@ -1,4 +1,4 @@
-// server.js - BACKEND SOCKET.IO PRODUCTION READY v10 - DIFFICULTY SYSTEM
+// server.js - BACKEND SOCKET.IO PRODUCTION READY v10 - DIFFICULTY SYSTEM + INACTIVITY FIX
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -31,7 +31,7 @@ app.use(express.json());
 
 const rooms = {};
 
-// ✅ NOUVEAU - FILES PAR MODE **ET** DIFFICULTÉ
+// ✅ FILES PAR MODE **ET** DIFFICULTÉ
 const queues = {
   classic: {
     easy: [],
@@ -86,7 +86,7 @@ function calculateScore(player, timeInSeconds) {
   return Math.max(0, baseScore + timeBonus - errorPenalty + comboBonus);
 }
 
-// ✅ NOUVEAU - MAPPING DIFFICULTÉ
+// ✅ MAPPING DIFFICULTÉ
 function getDifficultyConfig(difficulty) {
   const configs = {
     easy: { cellsToRemove: 35, name: 'easy' },
@@ -148,86 +148,86 @@ function getSolution() {
   ];
 }
 
-// ✅ TIMER INACTIVITÉ
-function setupInactivityTimer(roomId) {
+// ✅✅✅ NOUVEAU - TIMER INDIVIDUEL PAR JOUEUR
+function setupPlayerInactivityTimer(roomId, playerId) {
   const room = rooms[roomId];
   if (!room) return;
   
-  if (room.inactivityTimer) {
-    clearTimeout(room.inactivityTimer);
+  const player = room.players[playerId];
+  if (!player) return;
+  
+  // ✅ CLEAR ancien timer du joueur
+  if (player.inactivityTimer) {
+    clearTimeout(player.inactivityTimer);
   }
   
-  room.inactivityTimer = setTimeout(() => {
-    console.log(`⏰ INACTIVITÉ 3min - Room ${roomId}`);
+  // ✅ NOUVEAU TIMER PERSONNEL (3 MIN)
+  player.inactivityTimer = setTimeout(() => {
+    console.log(`⏰ INACTIVITÉ 3min - ${player.playerName} dans ${roomId}`);
     
-    const players = Object.values(room.players);
-    if (players.length !== 2) return;
+    // ✅ VÉRIFIER SI ROOM EXISTE TOUJOURS
+    if (!rooms[roomId]) return;
     
-    const elapsed = (Date.now() - room.startTime) / 1000;
+    const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
+    if (!opponent) return;
     
-    // ✅ DÉTERMINER QUI EST INACTIF (celui avec lastMoveTime le plus ancien)
-    let inactivePlayer, activePlayer;
-    
-    if (players[0].lastMoveTime < players[1].lastMoveTime) {
-      inactivePlayer = players[0];
-      activePlayer = players[1];
-    } else {
-      inactivePlayer = players[1];
-      activePlayer = players[0];
-    }
+    const elapsed = Math.floor((Date.now() - room.startTime) / 1000);
     
     // ✅ CALCUL SCORES
-    const fullScore = calculateScore(activePlayer, elapsed);
-    const winnerScore = Math.floor(fullScore * 0.25); // 25% du score normal
-    const loserScore = 0;
+    const opponentScore = 2500; // 🎁 BONUS VICTOIRE SANS JOUER
+    const inactiveScore = 0;
     
-    console.log(`🏆 ${activePlayer.playerName} gagne par inactivité de ${inactivePlayer.playerName}`);
-    console.log(`   Score réduit: ${winnerScore} (25% de ${fullScore})`);
+    console.log(`🏆 ${opponent.playerName} GAGNE par inactivité de ${player.playerName}`);
+    console.log(`   Score gagnant: ${opponentScore} pts (bonus AFK)`);
     
-    // ✅ RÉSULTAT GAGNANT
-    const resultWinner = {
-      winnerId: activePlayer.playerId,
-      winnerName: activePlayer.playerName,
-      winnerScore,
-      loserId: inactivePlayer.playerId,
-      loserName: inactivePlayer.playerName,
-      loserScore,
+    // ✅ RÉSULTAT
+    const result = {
+      winnerId: opponent.playerId,
+      winnerName: opponent.playerName,
+      winnerScore: opponentScore,
+      loserId: playerId,
+      loserName: player.playerName,
+      loserScore: inactiveScore,
       reason: 'inactivity'
     };
     
-    // ✅ RÉSULTAT PERDANT
-    const resultLoser = {
-      winnerId: activePlayer.playerId,
-      winnerName: activePlayer.playerName,
-      winnerScore,
-      loserId: inactivePlayer.playerId,
-      loserName: inactivePlayer.playerName,
-      loserScore,
-      reason: 'inactivity'
-    };
+    // ✅ ENVOYER GAME_OVER
+    io.to(opponent.socketId).emit('game_over', result);
+    io.to(player.socketId).emit('game_over', result);
     
-    // ✅ ENVOYER À CHACUN
-    io.to(activePlayer.socketId).emit('game_over', resultWinner);
-    io.to(inactivePlayer.socketId).emit('game_over', resultLoser);
+    // ✅ CLEANUP TOUS LES TIMERS
+    Object.values(room.players).forEach(p => {
+      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+    });
     
-    if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
     delete rooms[roomId];
+    console.log(`🏁 Partie terminée par inactivité de ${player.playerName}`);
     
-    console.log(`🏁 Partie terminée par inactivité`);
-  }, INACTIVITY_TIMEOUT);
+  }, INACTIVITY_TIMEOUT); // 3 MINUTES
+  
+  console.log(`⏱️ Timer inactivité démarré pour ${player.playerName}`);
 }
 
-function resetInactivityTimer(roomId) {
+// ✅✅✅ RESET UNIQUEMENT LE TIMER DU JOUEUR QUI JOUE
+function resetPlayerInactivityTimer(roomId, playerId) {
   const room = rooms[roomId];
   if (!room) return;
   
-  if (room.inactivityTimer) {
-    clearTimeout(room.inactivityTimer);
+  const player = room.players[playerId];
+  if (!player) return;
+  
+  player.lastMoveTime = Date.now();
+  
+  if (player.inactivityTimer) {
+    clearTimeout(player.inactivityTimer);
   }
-  setupInactivityTimer(roomId);
+  
+  setupPlayerInactivityTimer(roomId, playerId);
+  
+  console.log(`⏱️ Timer reset pour ${player.playerName}`);
 }
 
-// ✅ NOUVEAU - FONCTION MATCHMAKING
+// ✅ FONCTION MATCHMAKING
 function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
   const queue = queues[gameMode][difficulty];
   
@@ -245,7 +245,7 @@ function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
     rooms[roomId] = {
       roomId,
       gameMode,
-      difficulty, // ✅ STOCKER LA DIFFICULTÉ
+      difficulty,
       initialPuzzle: frozenInitialPuzzle,
       players: {
         [playerId]: {
@@ -254,7 +254,9 @@ function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
           grid: JSON.parse(JSON.stringify(puzzle)),
           solution: JSON.parse(JSON.stringify(solution)),
           correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+          progress: calculateProgress(puzzle), speed: 0, 
+          lastMoveTime: Date.now(),
+          inactivityTimer: null // ✅ AJOUT CHAMP
         },
         [opponent.playerId]: {
           playerId: opponent.playerId,
@@ -263,14 +265,18 @@ function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
           grid: JSON.parse(JSON.stringify(puzzle)),
           solution: JSON.parse(JSON.stringify(solution)),
           correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, lastMoveTime: Date.now()
+          progress: calculateProgress(puzzle), speed: 0, 
+          lastMoveTime: Date.now(),
+          inactivityTimer: null // ✅ AJOUT CHAMP
         }
       },
       status: 'playing',
       startTime: Date.now()
     };
     
-    setupInactivityTimer(roomId);
+    // ✅✅✅ DÉMARRER UN TIMER PAR JOUEUR
+    setupPlayerInactivityTimer(roomId, playerId);
+    setupPlayerInactivityTimer(roomId, opponent.playerId);
     
     console.log(`🎮 Match ${gameMode}/${difficulty}: ${playerName} vs ${opponent.playerName}`);
     
@@ -280,7 +286,7 @@ function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
       puzzle, 
       solution,
       gameMode,
-      difficulty // ✅ ENVOYER LA DIFFICULTÉ AU CLIENT
+      difficulty
     });
     
     io.to(opponent.socketId).emit('matchFound', {
@@ -292,10 +298,10 @@ function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
       difficulty
     });
     
-    return true; // ✅ MATCH TROUVÉ
+    return true;
   }
   
-  return false; // ✅ PAS DE MATCH
+  return false;
 }
 
 // ========== SOCKET.IO EVENTS ==========
@@ -325,17 +331,22 @@ io.on('connection', (socket) => {
         delete disconnectedPlayers[playerId];
         
         room.players[playerId].socketId = socket.id;
-        resetInactivityTimer(roomId);
+        
+        // ✅✅✅ RESTART TIMERS INDIVIDUELS
+        setupPlayerInactivityTimer(roomId, playerId);
+        const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
+        if (opponent) {
+          setupPlayerInactivityTimer(roomId, opponent.playerId);
+        }
         
         console.log(`✅ ${playerName} RECONNECTÉ à ${roomId}!`);
         
-        const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
         const player = room.players[playerId];
         
         socket.emit('reconnection_dialog', {
           roomId,
           gameMode: room.gameMode,
-          difficulty: room.difficulty, // ✅ INCLURE DIFFICULTÉ
+          difficulty: room.difficulty,
           opponentName: opponent?.playerName || 'Adversaire',
           puzzle: player.grid,
           initialPuzzle: room.initialPuzzle,
@@ -365,7 +376,6 @@ io.on('connection', (socket) => {
     socket.emit('connection_confirmed', { success: true, playerId });
   });
   
-  // ✅ NOUVEAU - joinQueue AVEC DIFFICULTÉ
   socket.on('joinQueue', (data) => {
     const { playerId, playerName, gameMode, difficulty = 'medium' } = data;
     
@@ -433,7 +443,6 @@ io.on('connection', (socket) => {
     if (!player) return;
     
     console.log(`⚠️ updateProgress DEPRECATED - Utilisez cell_played`);
-    resetInactivityTimer(roomId);
   });
   
   socket.on('cell_played', (data) => {
@@ -482,7 +491,8 @@ io.on('connection', (socket) => {
     
     console.log(`🎯 ${player.playerName} [${row}][${col}]=${value} → ${isCorrect ? '✅' : '❌'} | ${player.progress}/81`);
     
-    resetInactivityTimer(roomId);
+    // ✅✅✅ RESET UNIQUEMENT LE TIMER DU JOUEUR QUI JOUE
+    resetPlayerInactivityTimer(roomId, playerId);
     
     // ✅ ENVOYER À L'ADVERSAIRE
     const opponentSocketId = getOpponentSocketId(roomId, playerId);
@@ -523,7 +533,11 @@ io.on('connection', (socket) => {
       io.to(player.socketId).emit('game_over', result);
       io.to(opponent.socketId).emit('game_over', result);
       
-      if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
+      // ✅✅✅ CLEAR TOUS LES TIMERS INDIVIDUELS
+      Object.values(room.players).forEach(p => {
+        if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+      });
+      
       setTimeout(() => delete rooms[roomId], 5000);
     }
   });
@@ -538,6 +552,9 @@ io.on('connection', (socket) => {
     if (!player || player.energy < 1) return;
     
     player.energy--;
+    
+    // ✅✅✅ RESET TIMER DU JOUEUR QUI UTILISE LE POWER
+    resetPlayerInactivityTimer(roomId, playerId);
     
     const powers = [
       { type: 'fog', duration: 2000 },
@@ -607,7 +624,10 @@ io.on('connection', (socket) => {
       console.log(`🏆 ${opponent.playerName} gagne par abandon`);
     }
     
-    if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
+    // ✅✅✅ CLEAR TOUS LES TIMERS
+    Object.values(room.players).forEach(p => {
+      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+    });
     
     if (disconnectedPlayers[playerId]) {
       clearTimeout(disconnectedPlayers[playerId].timeout);
@@ -664,7 +684,11 @@ io.on('connection', (socket) => {
               io.to(opponent.socketId).emit('game_over', result);
             }
             
-            if (room.inactivityTimer) clearTimeout(room.inactivityTimer);
+            // ✅✅✅ CLEAR TOUS LES TIMERS
+            Object.values(room.players).forEach(p => {
+              if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+            });
+            
             delete rooms[roomId];
             delete disconnectedPlayers[disconnected.playerId];
           }, RECONNECT_TIMEOUT)
@@ -698,7 +722,7 @@ io.on('connection', (socket) => {
 app.get('/', (req, res) => {
   res.json({
     status: 'alive',
-    message: 'Sudoku Server v10 - DIFFICULTY SYSTEM',
+    message: 'Sudoku Server v10 - DIFFICULTY SYSTEM + INACTIVITY FIX',
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString()
   });
@@ -707,7 +731,6 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   const memUsage = process.memoryUsage();
   
-  // ✅ COMPTER TOUS LES JOUEURS EN ATTENTE
   let totalWaiting = 0;
   for (const mode in queues) {
     for (const difficulty in queues[mode]) {
@@ -748,7 +771,7 @@ app.get('/stats', (req, res) => {
     rooms: Object.keys(rooms).map(id => ({
       roomId: id,
       gameMode: rooms[id].gameMode,
-      difficulty: rooms[id].difficulty, // ✅ INCLURE DIFFICULTÉ
+      difficulty: rooms[id].difficulty,
       players: Object.keys(rooms[id].players).map(pid => ({
         name: rooms[id].players[pid].playerName,
         progress: rooms[id].players[pid].progress,
@@ -792,8 +815,7 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Serveur v10 DIFFICULTY SYSTEM sur port ${PORT}`);
+  console.log(`🚀 Serveur v10 DIFFICULTY + INACTIVITY FIX sur port ${PORT}`);
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
-
