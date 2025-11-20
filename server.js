@@ -1,4 +1,4 @@
-// server.js - BACKEND SOCKET.IO PRODUCTION READY v11 - FIX INACTIVITY VICTORY POPUP
+// server.js - BACKEND SOCKET.IO PRODUCTION READY v12 - FIX SYNTAX + POWERUP + SCORES
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -60,19 +60,17 @@ const queues = {
 
 const connectedSockets = {};
 const disconnectedPlayers = {};
+const finishedGames = {};
 
-// ✅✅✅ NOUVEAU - Historique des parties terminées (garde 5 minutes)
-const finishedGames = {}; // { playerId: { result, timestamp } }
-
-const INACTIVITY_TIMEOUT = 3 * 60 * 1000; // 3 MINUTES
-const RECONNECT_TIMEOUT = 60000; // 60 SECONDES
-const FINISHED_GAME_TTL = 5 * 60 * 1000; // 5 minutes
+const INACTIVITY_TIMEOUT = 3 * 60 * 1000;
+const RECONNECT_TIMEOUT = 60000;
+const FINISHED_GAME_TTL = 5 * 60 * 1000;
 const TIME_ATTACK_DURATIONS = {
-  timeAttackClassic: 5 * 60 * 1000,  // 5 minutes
-  timeAttackPowerup: 3 * 60 * 1000   // 3 minutes
+  timeAttackClassic: 5 * 60 * 1000,
+  timeAttackPowerup: 3 * 60 * 1000
 };
 
-// ✅ Cleanup automatique des parties terminées
+// ✅ Cleanup automatique
 setInterval(() => {
   const now = Date.now();
   for (const playerId in finishedGames) {
@@ -81,7 +79,7 @@ setInterval(() => {
       console.log(`🧹 Partie terminée supprimée pour ${playerId}`);
     }
   }
-}, 60000); // Toutes les 60 secondes
+}, 60000);
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -115,26 +113,20 @@ function calculateScore(player, timeInSeconds) {
   
   return Math.max(0, baseScore + timeBonus - errorPenalty + comboBonus);
 }
+
 function calculateTimeAttackScore(player) {
   let score = 0;
   
-  // +10 par coup correct
   score += player.correctMoves * 10;
-  
-  // +2 par combo
   score += player.combo * 2;
-  
-  // -5 par erreur
   score -= player.errors * 5;
   
-  // Bonus complétion si grille terminée
   if (player.progress >= 81 || player.completedEarly) {
     score += 500;
   }
   
   return Math.max(0, score);
 }
-// ========== LIGNE ~120 - APRÈS calculateTimeAttackScore() ==========
 
 function calculateFinalScore(room, player) {
   const isTimeAttack = room.gameMode.startsWith('timeAttack');
@@ -146,6 +138,7 @@ function calculateFinalScore(room, player) {
     return calculateScore(player, elapsed);
   }
 }
+
 function getDifficultyConfig(difficulty) {
   const configs = {
     easy: { cellsToRemove: 35, name: 'easy' },
@@ -157,7 +150,6 @@ function getDifficultyConfig(difficulty) {
   return configs[difficulty] || configs.medium;
 }
 
-// ========== GÉNÉRATEUR SUDOKU ==========
 function generateSudokuPuzzle(difficulty) {
   const baseGrid = [
     [5, 3, 4, 6, 7, 8, 9, 1, 2],
@@ -207,7 +199,6 @@ function getSolution() {
   ];
 }
 
-// ✅✅✅ TIMER INDIVIDUEL PAR JOUEUR
 function setupPlayerInactivityTimer(roomId, playerId) {
   const room = rooms[roomId];
   if (!room) return;
@@ -219,67 +210,64 @@ function setupPlayerInactivityTimer(roomId, playerId) {
     clearTimeout(player.inactivityTimer);
   }
   
-// ========== LIGNE ~175 - DANS setupPlayerInactivityTimer() ==========
-
-player.inactivityTimer = setTimeout(() => {
-  console.log(`⏰ INACTIVITÉ 3min - ${player.playerName} dans ${roomId}`);
-  
-  if (!rooms[roomId]) return;
-  
-  const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
-  if (!opponent) return;
-  
-  // ✅✅✅ CALCUL SELON LE MODE
-  const opponentScore = room.gameMode.startsWith('timeAttack') ? 2500 : 2500;
-  const inactiveScore = 0;
-  
-  console.log(`🏆 ${opponent.playerName} GAGNE par inactivité de ${player.playerName}`);
-  console.log(`   Score gagnant: ${opponentScore} pts (bonus AFK)`);
-  
-  const result = {
-    winnerId: opponent.playerId,
-    winnerName: opponent.playerName,
-    winnerScore: opponentScore,
-    loserId: playerId,
-    loserName: player.playerName,
-    loserScore: inactiveScore,
-    reason: 'inactivity'
-  };
-  
-  room.status = 'finished';
-  
-  finishedGames[opponent.playerId] = {
-    result,
-    timestamp: Date.now()
-  };
-  finishedGames[playerId] = {
-    result,
-    timestamp: Date.now()
-  };
-  
-  console.log(`💾 Résultat sauvegardé (${room.gameMode})`);
-  
-  io.to(opponent.socketId).emit('game_over', result);
-  io.to(player.socketId).emit('game_over', result);
-  
-  const opponentSocket = io.sockets.sockets.get(opponent.socketId);
-  const playerSocket = io.sockets.sockets.get(player.socketId);
-  
-  if (opponentSocket) {
-    opponentSocket.emit('force_leave_room', { reason: 'inactivity', result });
-  }
-  if (playerSocket) {
-    playerSocket.emit('force_leave_room', { reason: 'inactivity', result });
-  }
-  
-  Object.values(room.players).forEach(p => {
-    if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
-  });
-  
-  delete rooms[roomId];
-  console.log(`🏁 Room ${roomId} supprimée (inactivité)`);
-  
-}, INACTIVITY_TIMEOUT);
+  player.inactivityTimer = setTimeout(() => {
+    console.log(`⏰ INACTIVITÉ 3min - ${player.playerName} dans ${roomId}`);
+    
+    if (!rooms[roomId]) return;
+    
+    const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
+    if (!opponent) return;
+    
+    const opponentScore = 2500;
+    const inactiveScore = 0;
+    
+    console.log(`🏆 ${opponent.playerName} GAGNE par inactivité de ${player.playerName}`);
+    console.log(`   Score gagnant: ${opponentScore} pts (bonus AFK)`);
+    
+    const result = {
+      winnerId: opponent.playerId,
+      winnerName: opponent.playerName,
+      winnerScore: opponentScore,
+      loserId: playerId,
+      loserName: player.playerName,
+      loserScore: inactiveScore,
+      reason: 'inactivity'
+    };
+    
+    room.status = 'finished';
+    
+    finishedGames[opponent.playerId] = {
+      result,
+      timestamp: Date.now()
+    };
+    finishedGames[playerId] = {
+      result,
+      timestamp: Date.now()
+    };
+    
+    console.log(`💾 Résultat sauvegardé (${room.gameMode})`);
+    
+    io.to(opponent.socketId).emit('game_over', result);
+    io.to(player.socketId).emit('game_over', result);
+    
+    const opponentSocket = io.sockets.sockets.get(opponent.socketId);
+    const playerSocket = io.sockets.sockets.get(player.socketId);
+    
+    if (opponentSocket) {
+      opponentSocket.emit('force_leave_room', { reason: 'inactivity', result });
+    }
+    if (playerSocket) {
+      playerSocket.emit('force_leave_room', { reason: 'inactivity', result });
+    }
+    
+    Object.values(room.players).forEach(p => {
+      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+    });
+    
+    delete rooms[roomId];
+    console.log(`🏁 Room ${roomId} supprimée (inactivité)`);
+    
+  }, INACTIVITY_TIMEOUT);
   
   console.log(`⏱️ Timer inactivité démarré pour ${player.playerName}`);
 }
@@ -315,98 +303,94 @@ function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
     
     const frozenInitialPuzzle = JSON.parse(JSON.stringify(puzzle));
     
- const isTimeAttack = gameMode.startsWith('timeAttack');
-const timeLimit = isTimeAttack ? TIME_ATTACK_DURATIONS[gameMode] : null;
+    const isTimeAttack = gameMode.startsWith('timeAttack');
+    const timeLimit = isTimeAttack ? TIME_ATTACK_DURATIONS[gameMode] : null;
 
-rooms[roomId] = {
-  roomId,
-  gameMode,
-  difficulty,
-  initialPuzzle: frozenInitialPuzzle,
-  players: {
-    [playerId]: {
-      playerId, playerName,
-      socketId: socket.id,
-      grid: JSON.parse(JSON.stringify(puzzle)),
-      solution: JSON.parse(JSON.stringify(solution)),
-      correctMoves: 0, errors: 0, combo: 0, energy: 0,
-      progress: calculateProgress(puzzle), speed: 0, 
-      lastMoveTime: Date.now(),
-      inactivityTimer: null,
-      completedEarly: false
-    },
-    [opponent.playerId]: {
-      playerId: opponent.playerId,
-      playerName: opponent.playerName,
-      socketId: opponent.socketId,
-      grid: JSON.parse(JSON.stringify(puzzle)),
-      solution: JSON.parse(JSON.stringify(solution)),
-      correctMoves: 0, errors: 0, combo: 0, energy: 0,
-      progress: calculateProgress(puzzle), speed: 0, 
-      lastMoveTime: Date.now(),
-      inactivityTimer: null,
-      completedEarly: false
-    }
-  },
-  status: 'playing',
-  startTime: Date.now(),
-  isTimeAttack,
-  timeLimit,
-  endTime: isTimeAttack ? (Date.now() + timeLimit) : null
-};
+    rooms[roomId] = {
+      roomId,
+      gameMode,
+      difficulty,
+      initialPuzzle: frozenInitialPuzzle,
+      players: {
+        [playerId]: {
+          playerId, playerName,
+          socketId: socket.id,
+          grid: JSON.parse(JSON.stringify(puzzle)),
+          solution: JSON.parse(JSON.stringify(solution)),
+          correctMoves: 0, errors: 0, combo: 0, energy: 0,
+          progress: calculateProgress(puzzle), speed: 0, 
+          lastMoveTime: Date.now(),
+          inactivityTimer: null,
+          completedEarly: false
+        },
+        [opponent.playerId]: {
+          playerId: opponent.playerId,
+          playerName: opponent.playerName,
+          socketId: opponent.socketId,
+          grid: JSON.parse(JSON.stringify(puzzle)),
+          solution: JSON.parse(JSON.stringify(solution)),
+          correctMoves: 0, errors: 0, combo: 0, energy: 0,
+          progress: calculateProgress(puzzle), speed: 0, 
+          lastMoveTime: Date.now(),
+          inactivityTimer: null,
+          completedEarly: false
+        }
+      },
+      status: 'playing',
+      startTime: Date.now(),
+      isTimeAttack,
+      timeLimit,
+      endTime: isTimeAttack ? (Date.now() + timeLimit) : null
+    };
     
     setupPlayerInactivityTimer(roomId, playerId);
     setupPlayerInactivityTimer(roomId, opponent.playerId);
-    // ✅ TIMER TIME ATTACK
-if (isTimeAttack) {
-  setTimeout(() => {
-    const room = rooms[roomId];
-    if (!room || room.status === 'finished') return;
     
-    console.log(`⏱️ TIME ATTACK TERMINÉ - ${roomId}`);
-    
-    room.status = 'finished';
-    
-    // Calculer scores finaux
-    const players = Object.values(room.players);
-    const [p1, p2] = players;
-    
-    const score1 = calculateTimeAttackScore(p1);
-    const score2 = calculateTimeAttackScore(p2);
-    
-    const winner = score1 > score2 ? p1 : p2;
-    const loser = score1 > score2 ? p2 : p1;
-    const winnerScore = Math.max(score1, score2);
-    const loserScore = Math.min(score1, score2);
-    
-    console.log(`🏆 TIME ATTACK: ${winner.playerName} (${winnerScore}) vs ${loser.playerName} (${loserScore})`);
-    
-    const result = {
-      winnerId: winner.playerId,
-      winnerName: winner.playerName,
-      winnerScore,
-      loserId: loser.playerId,
-      loserName: loser.playerName,
-      loserScore,
-      reason: 'time_up'
-    };
-    
-    // Sauvegarder résultat
-    finishedGames[winner.playerId] = { result, timestamp: Date.now() };
-    finishedGames[loser.playerId] = { result, timestamp: Date.now() };
-    
-    // Envoyer game_over
-    io.to(winner.socketId).emit('game_over', result);
-    io.to(loser.socketId).emit('game_over', result);
-    
-    // Cleanup
-    Object.values(room.players).forEach(p => {
-      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
-    });
-    
-    delete rooms[roomId];
-  }, timeLimit);
-}
+    if (isTimeAttack) {
+      setTimeout(() => {
+        const room = rooms[roomId];
+        if (!room || room.status === 'finished') return;
+        
+        console.log(`⏱️ TIME ATTACK TERMINÉ - ${roomId}`);
+        
+        room.status = 'finished';
+        
+        const players = Object.values(room.players);
+        const [p1, p2] = players;
+        
+        const score1 = calculateTimeAttackScore(p1);
+        const score2 = calculateTimeAttackScore(p2);
+        
+        const winner = score1 > score2 ? p1 : p2;
+        const loser = score1 > score2 ? p2 : p1;
+        const winnerScore = Math.max(score1, score2);
+        const loserScore = Math.min(score1, score2);
+        
+        console.log(`🏆 TIME ATTACK: ${winner.playerName} (${winnerScore}) vs ${loser.playerName} (${loserScore})`);
+        
+        const result = {
+          winnerId: winner.playerId,
+          winnerName: winner.playerName,
+          winnerScore,
+          loserId: loser.playerId,
+          loserName: loser.playerName,
+          loserScore,
+          reason: 'time_up'
+        };
+        
+        finishedGames[winner.playerId] = { result, timestamp: Date.now() };
+        finishedGames[loser.playerId] = { result, timestamp: Date.now() };
+        
+        io.to(winner.socketId).emit('game_over', result);
+        io.to(loser.socketId).emit('game_over', result);
+        
+        Object.values(room.players).forEach(p => {
+          if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+        });
+        
+        delete rooms[roomId];
+      }, timeLimit);
+    }
     
     console.log(`🎮 Match ${gameMode}/${difficulty}: ${playerName} vs ${opponent.playerName}`);
     
@@ -451,7 +435,6 @@ io.on('connection', (socket) => {
     
     connectedSockets[playerId] = socket.id;
     
-    // ✅✅✅ VÉRIFIER SI PARTIE TERMINÉE RÉCEMMENT
     if (finishedGames[playerId]) {
       const { result, timestamp } = finishedGames[playerId];
       
@@ -459,17 +442,12 @@ io.on('connection', (socket) => {
       console.log(`   Résultat: ${result.reason}`);
       console.log(`   Winner: ${result.winnerName} | Loser: ${result.loserName}`);
       
-      // Envoyer immédiatement le résultat
       socket.emit('game_over', result);
-      
-      // Nettoyer
       delete finishedGames[playerId];
-      
       socket.emit('connection_confirmed', { success: true, playerId });
       return;
     }
     
-    // ✅ RECONNEXION NORMALE
     if (disconnectedPlayers[playerId]) {
       const { roomId, timeout } = disconnectedPlayers[playerId];
       const room = rooms[roomId];
@@ -526,8 +504,8 @@ io.on('connection', (socket) => {
   socket.on('joinQueue', (data) => {
     const { playerId, playerName, gameMode, difficulty = 'medium' } = data;
     
-   const validDifficulties = ['easy', 'medium', 'hard', 'expert'];
-const validModes = ['classic', 'powerup', 'timeAttackClassic', 'timeAttackPowerup'];
+    const validDifficulties = ['easy', 'medium', 'hard', 'expert'];
+    const validModes = ['classic', 'powerup', 'timeAttackClassic', 'timeAttackPowerup'];
     
     if (!validModes.includes(gameMode)) {
       console.log(`⚠️ Mode invalide: ${gameMode}`);
@@ -615,7 +593,9 @@ const validModes = ['classic', 'powerup', 'timeAttackClassic', 'timeAttackPoweru
       player.correctMoves++;
       player.combo++;
       
-      if (room.gameMode === 'powerup' && player.combo > 0 && player.combo % 5 === 0) {
+      // ✅ ÉNERGIE EN POWERUP + TIME ATTACK POWERUP
+      if ((room.gameMode === 'powerup' || room.gameMode === 'timeAttackPowerup') && 
+          player.combo > 0 && player.combo % 5 === 0) {
         player.energy = Math.floor(player.combo / 5);
         console.log(`⚡ ${player.playerName} ÉNERGIE +1 → Total: ${player.energy}`);
       }
@@ -642,35 +622,30 @@ const validModes = ['classic', 'powerup', 'timeAttackClassic', 'timeAttackPoweru
       });
     }
     
-   // ✅ FIN DE JEU
-if (player.progress >= 81) {
-  // ✅ SI TIME ATTACK → BLOQUER SANS TERMINER
-  if (room.isTimeAttack) {
-    console.log(`🎯 ${player.playerName} GRILLE TERMINÉE (Time Attack) - En attente timer`);
-    
-    // Bonus complétion
-    player.completedEarly = true;
-    
-    // Notifier joueur
-    io.to(player.socketId).emit('grid_completed', {
-      completionBonus: 500,
-      waitingForTimer: true
-    });
-    
-    return; // ✅ NE PAS TERMINER LA PARTIE
-  }
-  
-  // ✅ MODE CLASSIQUE → FIN NORMALE
-  room.status = 'finished';
-  
-  const opponentId = Object.keys(room.players).find(id => id !== playerId);
-  const opponent = room.players[opponentId];
-  
-  const elapsed = (Date.now() - room.startTime) / 1000;
-  const winnerScore = calculateScore(player, elapsed);
-  const loserScore = calculateScore(opponent, elapsed);
-  
-  console.log(`🏆 ${player.playerName} GAGNE! ${winnerScore}pts vs ${loserScore}pts`);
+    if (player.progress >= 81) {
+      if (room.isTimeAttack) {
+        console.log(`🎯 ${player.playerName} GRILLE TERMINÉE (Time Attack) - En attente timer`);
+        
+        player.completedEarly = true;
+        
+        io.to(player.socketId).emit('grid_completed', {
+          completionBonus: 500,
+          waitingForTimer: true
+        });
+        
+        return;
+      }
+      
+      room.status = 'finished';
+      
+      const opponentId = Object.keys(room.players).find(id => id !== playerId);
+      const opponent = room.players[opponentId];
+      
+      const elapsed = (Date.now() - room.startTime) / 1000;
+      const winnerScore = calculateScore(player, elapsed);
+      const loserScore = calculateScore(opponent, elapsed);
+      
+      console.log(`🏆 ${player.playerName} GAGNE! ${winnerScore}pts vs ${loserScore}pts`);
       
       const result = {
         winnerId: playerId,
@@ -682,7 +657,6 @@ if (player.progress >= 81) {
         reason: 'completed'
       };
       
-      // ✅✅✅ SAUVEGARDER LE RÉSULTAT
       finishedGames[playerId] = {
         result,
         timestamp: Date.now()
@@ -705,57 +679,44 @@ if (player.progress >= 81) {
     }
   });
   
- // ========== LIGNE ~640 - HANDLER trigger_power ==========
-
-socket.on('trigger_power', (data) => {
-  const { roomId, playerId } = data;
-  
-  const room = rooms[roomId];
-  
-  // ✅✅✅ FIX: AUTORISER POWERUP + TIME ATTACK POWERUP
-  if (!room || (room.gameMode !== 'powerup' && room.gameMode !== 'timeAttackPowerup')) {
-    console.log(`⚠️ Power-up impossible - Mode: ${room?.gameMode || 'unknown'}`);
-    return;
-  }
-  
-  const player = room.players[playerId];
-  if (!player || player.energy < 1) {
-    console.log(`⚠️ Énergie insuffisante - ${player?.playerName || 'unknown'}: ${player?.energy || 0}`);
-    return;
-  }
-  
-  player.energy--;
-  
-  resetPlayerInactivityTimer(roomId, playerId);
-  
-  const powers = [
-    { type: 'fog', duration: 2000 },
-    { type: 'flash', duration: 1000 },
-    { type: 'stun', duration: 1500 },
-    { type: 'shake', duration: 1500 }
-  ];
-  
-  const randomPower = powers[Math.floor(Math.random() * powers.length)];
-  const targetSelf = Math.random() < 0.40;
-  
-  const opponentSocketId = getOpponentSocketId(roomId, playerId);
-  
-  if (targetSelf) {
-    console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR LUI`);
-    socket.emit('powerup_triggered', {
-      type: randomPower.type,
-      duration: randomPower.duration
-    });
-  } else {
-    console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR ADVERSAIRE`);
-    if (opponentSocketId) {
-      io.to(opponentSocketId).emit('powerup_triggered', {
+  socket.on('trigger_power', (data) => {
+    const { roomId, playerId } = data;
+    
+    const room = rooms[roomId];
+    
+    if (!room || (room.gameMode !== 'powerup' && room.gameMode !== 'timeAttackPowerup')) {
+      console.log(`⚠️ Power-up impossible - Mode: ${room?.gameMode || 'unknown'}`);
+      return;
+    }
+    
+    const player = room.players[playerId];
+    if (!player || player.energy < 1) {
+      console.log(`⚠️ Énergie insuffisante - ${player?.playerName || 'unknown'}: ${player?.energy || 0}`);
+      return;
+    }
+    
+    player.energy--;
+    
+    resetPlayerInactivityTimer(roomId, playerId);
+    
+    const powers = [
+      { type: 'fog', duration: 2000 },
+      { type: 'flash', duration: 1000 },
+      { type: 'stun', duration: 1500 },
+      { type: 'shake', duration: 1500 }
+    ];
+    
+    const randomPower = powers[Math.floor(Math.random() * powers.length)];
+    const targetSelf = Math.random() < 0.40;
+    
+    const opponentSocketId = getOpponentSocketId(roomId, playerId);
+    
+    if (targetSelf) {
+      console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR LUI`);
+      socket.emit('powerup_triggered', {
         type: randomPower.type,
         duration: randomPower.duration
       });
-    }
-  }
-});
     } else {
       console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR ADVERSAIRE`);
       if (opponentSocketId) {
@@ -768,81 +729,77 @@ socket.on('trigger_power', (data) => {
   });
 
   socket.on('heartbeat', (data) => {
-  const { roomId, playerId } = data;
-  
-  const room = rooms[roomId];
-  if (!room) return;
-  
-  const player = room.players[playerId];
-  if (!player) return;
-  
-  // ✅ RESET LE TIMER SANS LOG (sinon spam)
-  resetPlayerInactivityTimer(roomId, playerId);
-});
+    const { roomId, playerId } = data;
+    
+    const room = rooms[roomId];
+    if (!room) return;
+    
+    const player = room.players[playerId];
+    if (!player) return;
+    
+    resetPlayerInactivityTimer(roomId, playerId);
+  });
   
   socket.on('gameEnd', (data) => {
     const { roomId, playerId, score, timeInSeconds } = data;
     console.log(`🏁 ${playerId}: ${score}pts en ${timeInSeconds}s`);
   });
 
- // ========== LIGNE ~710 - HANDLER playerAbandoned ==========
-
-socket.on('playerAbandoned', (data) => {
-  const { roomId, playerId } = data;
-  
-  const room = rooms[roomId];
-  if (!room) return;
-  
-  const abandoned = room.players[playerId];
-  if (!abandoned) return;
-  
-  console.log(`🚪 ${abandoned.playerName} ABANDONNE`);
-  
-  const opponentId = Object.keys(room.players).find(id => id !== playerId);
-  const opponent = room.players[opponentId];
-  
-  if (opponent) {
-    // ✅✅✅ CALCUL SELON LE MODE
-    const winnerScore = calculateFinalScore(room, opponent);
-    const loserScore = 0; // Abandon = 0 pts
+  socket.on('playerAbandoned', (data) => {
+    const { roomId, playerId } = data;
     
-    const result = {
-      winnerId: opponentId,
-      winnerName: opponent.playerName,
-      winnerScore,
-      loserId: playerId,
-      loserName: abandoned.playerName,
-      loserScore,
-      reason: 'opponent_abandoned'
-    };
+    const room = rooms[roomId];
+    if (!room) return;
     
-    finishedGames[opponentId] = {
-      result,
-      timestamp: Date.now()
-    };
-    finishedGames[playerId] = {
-      result,
-      timestamp: Date.now()
-    };
+    const abandoned = room.players[playerId];
+    if (!abandoned) return;
     
-    console.log(`💾 Résultat abandon sauvegardé (${room.gameMode})`);
-    console.log(`   Winner: ${winnerScore} pts | Loser: ${loserScore} pts`);
+    console.log(`🚪 ${abandoned.playerName} ABANDONNE`);
     
-    io.to(opponent.socketId).emit('game_over', result);
-    io.to(abandoned.socketId).emit('game_over', result);
-  }
-  
-  Object.values(room.players).forEach(p => {
-    if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+    const opponentId = Object.keys(room.players).find(id => id !== playerId);
+    const opponent = room.players[opponentId];
+    
+    if (opponent) {
+      const winnerScore = calculateFinalScore(room, opponent);
+      const loserScore = 0;
+      
+      const result = {
+        winnerId: opponentId,
+        winnerName: opponent.playerName,
+        winnerScore,
+        loserId: playerId,
+        loserName: abandoned.playerName,
+        loserScore,
+        reason: 'opponent_abandoned'
+      };
+      
+      finishedGames[opponentId] = {
+        result,
+        timestamp: Date.now()
+      };
+      finishedGames[playerId] = {
+        result,
+        timestamp: Date.now()
+      };
+      
+      console.log(`💾 Résultat abandon sauvegardé (${room.gameMode})`);
+      console.log(`   Winner: ${winnerScore} pts | Loser: ${loserScore} pts`);
+      
+      io.to(opponent.socketId).emit('game_over', result);
+      io.to(abandoned.socketId).emit('game_over', result);
+    }
+    
+    Object.values(room.players).forEach(p => {
+      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+    });
+    
+    if (disconnectedPlayers[playerId]) {
+      clearTimeout(disconnectedPlayers[playerId].timeout);
+      delete disconnectedPlayers[playerId];
+    }
+    
+    delete rooms[roomId];
   });
-  
-  if (disconnectedPlayers[playerId]) {
-    clearTimeout(disconnectedPlayers[playerId].timeout);
-    delete disconnectedPlayers[playerId];
-  }
-  
-  delete rooms[roomId];
-});
 
   socket.on('disconnect', () => {
     console.log('🔌 Déconnexion:', socket.id);
@@ -1040,6 +997,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
 
