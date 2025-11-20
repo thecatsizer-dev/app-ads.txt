@@ -43,6 +43,18 @@ const queues = {
     medium: [],
     hard: [],
     expert: []
+  },
+  timeAttackClassic: {
+    easy: [],
+    medium: [],
+    hard: [],
+    expert: []
+  },
+  timeAttackPowerup: {
+    easy: [],
+    medium: [],
+    hard: [],
+    expert: []
   }
 };
 
@@ -55,6 +67,10 @@ const finishedGames = {}; // { playerId: { result, timestamp } }
 const INACTIVITY_TIMEOUT = 3 * 60 * 1000; // 3 MINUTES
 const RECONNECT_TIMEOUT = 60000; // 60 SECONDES
 const FINISHED_GAME_TTL = 5 * 60 * 1000; // 5 minutes
+const TIME_ATTACK_DURATIONS = {
+  timeAttackClassic: 5 * 60 * 1000,  // 5 minutes
+  timeAttackPowerup: 3 * 60 * 1000   // 3 minutes
+};
 
 // ✅ Cleanup automatique des parties terminées
 setInterval(() => {
@@ -98,6 +114,25 @@ function calculateScore(player, timeInSeconds) {
   const comboBonus = player.combo * 10;
   
   return Math.max(0, baseScore + timeBonus - errorPenalty + comboBonus);
+}
+function calculateTimeAttackScore(player) {
+  let score = 0;
+  
+  // +10 par coup correct
+  score += player.correctMoves * 10;
+  
+  // +2 par combo
+  score += player.combo * 2;
+  
+  // -5 par erreur
+  score -= player.errors * 5;
+  
+  // Bonus complétion si grille terminée
+  if (player.progress >= 81 || player.completedEarly) {
+    score += 500;
+  }
+  
+  return Math.max(0, score);
 }
 
 function getDifficultyConfig(difficulty) {
@@ -273,40 +308,98 @@ function tryMatchmaking(socket, playerId, playerName, gameMode, difficulty) {
     
     const frozenInitialPuzzle = JSON.parse(JSON.stringify(puzzle));
     
-    rooms[roomId] = {
-      roomId,
-      gameMode,
-      difficulty,
-      initialPuzzle: frozenInitialPuzzle,
-      players: {
-        [playerId]: {
-          playerId, playerName,
-          socketId: socket.id,
-          grid: JSON.parse(JSON.stringify(puzzle)),
-          solution: JSON.parse(JSON.stringify(solution)),
-          correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, 
-          lastMoveTime: Date.now(),
-          inactivityTimer: null
-        },
-        [opponent.playerId]: {
-          playerId: opponent.playerId,
-          playerName: opponent.playerName,
-          socketId: opponent.socketId,
-          grid: JSON.parse(JSON.stringify(puzzle)),
-          solution: JSON.parse(JSON.stringify(solution)),
-          correctMoves: 0, errors: 0, combo: 0, energy: 0,
-          progress: calculateProgress(puzzle), speed: 0, 
-          lastMoveTime: Date.now(),
-          inactivityTimer: null
-        }
-      },
-      status: 'playing',
-      startTime: Date.now()
-    };
+ const isTimeAttack = gameMode.startsWith('timeAttack');
+const timeLimit = isTimeAttack ? TIME_ATTACK_DURATIONS[gameMode] : null;
+
+rooms[roomId] = {
+  roomId,
+  gameMode,
+  difficulty,
+  initialPuzzle: frozenInitialPuzzle,
+  players: {
+    [playerId]: {
+      playerId, playerName,
+      socketId: socket.id,
+      grid: JSON.parse(JSON.stringify(puzzle)),
+      solution: JSON.parse(JSON.stringify(solution)),
+      correctMoves: 0, errors: 0, combo: 0, energy: 0,
+      progress: calculateProgress(puzzle), speed: 0, 
+      lastMoveTime: Date.now(),
+      inactivityTimer: null,
+      completedEarly: false
+    },
+    [opponent.playerId]: {
+      playerId: opponent.playerId,
+      playerName: opponent.playerName,
+      socketId: opponent.socketId,
+      grid: JSON.parse(JSON.stringify(puzzle)),
+      solution: JSON.parse(JSON.stringify(solution)),
+      correctMoves: 0, errors: 0, combo: 0, energy: 0,
+      progress: calculateProgress(puzzle), speed: 0, 
+      lastMoveTime: Date.now(),
+      inactivityTimer: null,
+      completedEarly: false
+    }
+  },
+  status: 'playing',
+  startTime: Date.now(),
+  isTimeAttack,
+  timeLimit,
+  endTime: isTimeAttack ? (Date.now() + timeLimit) : null
+};
     
     setupPlayerInactivityTimer(roomId, playerId);
     setupPlayerInactivityTimer(roomId, opponent.playerId);
+    // ✅ TIMER TIME ATTACK
+if (isTimeAttack) {
+  setTimeout(() => {
+    const room = rooms[roomId];
+    if (!room || room.status === 'finished') return;
+    
+    console.log(`⏱️ TIME ATTACK TERMINÉ - ${roomId}`);
+    
+    room.status = 'finished';
+    
+    // Calculer scores finaux
+    const players = Object.values(room.players);
+    const [p1, p2] = players;
+    
+    const score1 = calculateTimeAttackScore(p1);
+    const score2 = calculateTimeAttackScore(p2);
+    
+    const winner = score1 > score2 ? p1 : p2;
+    const loser = score1 > score2 ? p2 : p1;
+    const winnerScore = Math.max(score1, score2);
+    const loserScore = Math.min(score1, score2);
+    
+    console.log(`🏆 TIME ATTACK: ${winner.playerName} (${winnerScore}) vs ${loser.playerName} (${loserScore})`);
+    
+    const result = {
+      winnerId: winner.playerId,
+      winnerName: winner.playerName,
+      winnerScore,
+      loserId: loser.playerId,
+      loserName: loser.playerName,
+      loserScore,
+      reason: 'time_up'
+    };
+    
+    // Sauvegarder résultat
+    finishedGames[winner.playerId] = { result, timestamp: Date.now() };
+    finishedGames[loser.playerId] = { result, timestamp: Date.now() };
+    
+    // Envoyer game_over
+    io.to(winner.socketId).emit('game_over', result);
+    io.to(loser.socketId).emit('game_over', result);
+    
+    // Cleanup
+    Object.values(room.players).forEach(p => {
+      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+    });
+    
+    delete rooms[roomId];
+  }, timeLimit);
+}
     
     console.log(`🎮 Match ${gameMode}/${difficulty}: ${playerName} vs ${opponent.playerName}`);
     
@@ -426,8 +519,8 @@ io.on('connection', (socket) => {
   socket.on('joinQueue', (data) => {
     const { playerId, playerName, gameMode, difficulty = 'medium' } = data;
     
-    const validDifficulties = ['easy', 'medium', 'hard', 'expert'];
-    const validModes = ['classic', 'powerup'];
+   const validDifficulties = ['easy', 'medium', 'hard', 'expert'];
+const validModes = ['classic', 'powerup', 'timeAttackClassic', 'timeAttackPowerup'];
     
     if (!validModes.includes(gameMode)) {
       console.log(`⚠️ Mode invalide: ${gameMode}`);
@@ -542,18 +635,35 @@ io.on('connection', (socket) => {
       });
     }
     
-    // ✅ FIN DE JEU
-    if (player.progress >= 81) {
-      room.status = 'finished';
-      
-      const opponentId = Object.keys(room.players).find(id => id !== playerId);
-      const opponent = room.players[opponentId];
-      
-      const elapsed = (Date.now() - room.startTime) / 1000;
-      const winnerScore = calculateScore(player, elapsed);
-      const loserScore = calculateScore(opponent, elapsed);
-      
-      console.log(`🏆 ${player.playerName} GAGNE! ${winnerScore}pts vs ${loserScore}pts`);
+   // ✅ FIN DE JEU
+if (player.progress >= 81) {
+  // ✅ SI TIME ATTACK → BLOQUER SANS TERMINER
+  if (room.isTimeAttack) {
+    console.log(`🎯 ${player.playerName} GRILLE TERMINÉE (Time Attack) - En attente timer`);
+    
+    // Bonus complétion
+    player.completedEarly = true;
+    
+    // Notifier joueur
+    io.to(player.socketId).emit('grid_completed', {
+      completionBonus: 500,
+      waitingForTimer: true
+    });
+    
+    return; // ✅ NE PAS TERMINER LA PARTIE
+  }
+  
+  // ✅ MODE CLASSIQUE → FIN NORMALE
+  room.status = 'finished';
+  
+  const opponentId = Object.keys(room.players).find(id => id !== playerId);
+  const opponent = room.players[opponentId];
+  
+  const elapsed = (Date.now() - room.startTime) / 1000;
+  const winnerScore = calculateScore(player, elapsed);
+  const loserScore = calculateScore(opponent, elapsed);
+  
+  console.log(`🏆 ${player.playerName} GAGNE! ${winnerScore}pts vs ${loserScore}pts`);
       
       const result = {
         winnerId: playerId,
@@ -901,4 +1011,5 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
