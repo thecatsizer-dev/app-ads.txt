@@ -134,7 +134,18 @@ function calculateTimeAttackScore(player) {
   
   return Math.max(0, score);
 }
+// ========== LIGNE ~120 - APRÈS calculateTimeAttackScore() ==========
 
+function calculateFinalScore(room, player) {
+  const isTimeAttack = room.gameMode.startsWith('timeAttack');
+  
+  if (isTimeAttack) {
+    return calculateTimeAttackScore(player);
+  } else {
+    const elapsed = (Date.now() - room.startTime) / 1000;
+    return calculateScore(player, elapsed);
+  }
+}
 function getDifficultyConfig(difficulty) {
   const configs = {
     easy: { cellsToRemove: 35, name: 'easy' },
@@ -208,71 +219,67 @@ function setupPlayerInactivityTimer(roomId, playerId) {
     clearTimeout(player.inactivityTimer);
   }
   
-  player.inactivityTimer = setTimeout(() => {
-    console.log(`⏰ INACTIVITÉ 3min - ${player.playerName} dans ${roomId}`);
-    
-    if (!rooms[roomId]) return;
-    
-    const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
-    if (!opponent) return;
-    
-    const elapsed = Math.floor((Date.now() - room.startTime) / 1000);
-    
-    const opponentScore = 2500;
-    const inactiveScore = 0;
-    
-    console.log(`🏆 ${opponent.playerName} GAGNE par inactivité de ${player.playerName}`);
-    console.log(`   Score gagnant: ${opponentScore} pts (bonus AFK)`);
-    
-    const result = {
-      winnerId: opponent.playerId,
-      winnerName: opponent.playerName,
-      winnerScore: opponentScore,
-      loserId: playerId,
-      loserName: player.playerName,
-      loserScore: inactiveScore,
-      reason: 'inactivity'
-    };
-    
-    room.status = 'finished';
-    
-    // ✅✅✅ SAUVEGARDER LE RÉSULTAT POUR RECONNEXION
-    finishedGames[opponent.playerId] = {
-      result,
-      timestamp: Date.now()
-    };
-    finishedGames[playerId] = {
-      result,
-      timestamp: Date.now()
-    };
-    
-    console.log(`💾 Résultat sauvegardé pour reconnexion des 2 joueurs`);
-    
-    // Envoyer game_over
-    io.to(opponent.socketId).emit('game_over', result);
-    io.to(player.socketId).emit('game_over', result);
-    
-    // Forcer la déconnexion
-    const opponentSocket = io.sockets.sockets.get(opponent.socketId);
-    const playerSocket = io.sockets.sockets.get(player.socketId);
-    
-    if (opponentSocket) {
-      opponentSocket.emit('force_leave_room', { reason: 'inactivity', result });
-    }
-    if (playerSocket) {
-      playerSocket.emit('force_leave_room', { reason: 'inactivity', result });
-    }
-    
-    // Cleanup timers
-    Object.values(room.players).forEach(p => {
-      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
-    });
-    
-    // Supprimer la room
-    delete rooms[roomId];
-    console.log(`🏁 Room ${roomId} supprimée (inactivité)`);
-    
-  }, INACTIVITY_TIMEOUT);
+// ========== LIGNE ~175 - DANS setupPlayerInactivityTimer() ==========
+
+player.inactivityTimer = setTimeout(() => {
+  console.log(`⏰ INACTIVITÉ 3min - ${player.playerName} dans ${roomId}`);
+  
+  if (!rooms[roomId]) return;
+  
+  const opponent = Object.values(room.players).find(p => p.playerId !== playerId);
+  if (!opponent) return;
+  
+  // ✅✅✅ CALCUL SELON LE MODE
+  const opponentScore = room.gameMode.startsWith('timeAttack') ? 2500 : 2500;
+  const inactiveScore = 0;
+  
+  console.log(`🏆 ${opponent.playerName} GAGNE par inactivité de ${player.playerName}`);
+  console.log(`   Score gagnant: ${opponentScore} pts (bonus AFK)`);
+  
+  const result = {
+    winnerId: opponent.playerId,
+    winnerName: opponent.playerName,
+    winnerScore: opponentScore,
+    loserId: playerId,
+    loserName: player.playerName,
+    loserScore: inactiveScore,
+    reason: 'inactivity'
+  };
+  
+  room.status = 'finished';
+  
+  finishedGames[opponent.playerId] = {
+    result,
+    timestamp: Date.now()
+  };
+  finishedGames[playerId] = {
+    result,
+    timestamp: Date.now()
+  };
+  
+  console.log(`💾 Résultat sauvegardé (${room.gameMode})`);
+  
+  io.to(opponent.socketId).emit('game_over', result);
+  io.to(player.socketId).emit('game_over', result);
+  
+  const opponentSocket = io.sockets.sockets.get(opponent.socketId);
+  const playerSocket = io.sockets.sockets.get(player.socketId);
+  
+  if (opponentSocket) {
+    opponentSocket.emit('force_leave_room', { reason: 'inactivity', result });
+  }
+  if (playerSocket) {
+    playerSocket.emit('force_leave_room', { reason: 'inactivity', result });
+  }
+  
+  Object.values(room.players).forEach(p => {
+    if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+  });
+  
+  delete rooms[roomId];
+  console.log(`🏁 Room ${roomId} supprimée (inactivité)`);
+  
+}, INACTIVITY_TIMEOUT);
   
   console.log(`⏱️ Timer inactivité démarré pour ${player.playerName}`);
 }
@@ -698,37 +705,57 @@ if (player.progress >= 81) {
     }
   });
   
-  socket.on('trigger_power', (data) => {
-    const { roomId, playerId } = data;
-    
-    const room = rooms[roomId];
-    if (!room || room.gameMode !== 'powerup') return;
-    
-    const player = room.players[playerId];
-    if (!player || player.energy < 1) return;
-    
-    player.energy--;
-    
-    resetPlayerInactivityTimer(roomId, playerId);
-    
-    const powers = [
-      { type: 'fog', duration: 2000 },
-      { type: 'flash', duration: 1000 },
-      { type: 'stun', duration: 1500 },
-      { type: 'shake', duration: 1500 }
-    ];
-    
-    const randomPower = powers[Math.floor(Math.random() * powers.length)];
-    const targetSelf = Math.random() < 0.40;
-    
-    const opponentSocketId = getOpponentSocketId(roomId, playerId);
-    
-    if (targetSelf) {
-      console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR LUI`);
-      socket.emit('powerup_triggered', {
+ // ========== LIGNE ~640 - HANDLER trigger_power ==========
+
+socket.on('trigger_power', (data) => {
+  const { roomId, playerId } = data;
+  
+  const room = rooms[roomId];
+  
+  // ✅✅✅ FIX: AUTORISER POWERUP + TIME ATTACK POWERUP
+  if (!room || (room.gameMode !== 'powerup' && room.gameMode !== 'timeAttackPowerup')) {
+    console.log(`⚠️ Power-up impossible - Mode: ${room?.gameMode || 'unknown'}`);
+    return;
+  }
+  
+  const player = room.players[playerId];
+  if (!player || player.energy < 1) {
+    console.log(`⚠️ Énergie insuffisante - ${player?.playerName || 'unknown'}: ${player?.energy || 0}`);
+    return;
+  }
+  
+  player.energy--;
+  
+  resetPlayerInactivityTimer(roomId, playerId);
+  
+  const powers = [
+    { type: 'fog', duration: 2000 },
+    { type: 'flash', duration: 1000 },
+    { type: 'stun', duration: 1500 },
+    { type: 'shake', duration: 1500 }
+  ];
+  
+  const randomPower = powers[Math.floor(Math.random() * powers.length)];
+  const targetSelf = Math.random() < 0.40;
+  
+  const opponentSocketId = getOpponentSocketId(roomId, playerId);
+  
+  if (targetSelf) {
+    console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR LUI`);
+    socket.emit('powerup_triggered', {
+      type: randomPower.type,
+      duration: randomPower.duration
+    });
+  } else {
+    console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR ADVERSAIRE`);
+    if (opponentSocketId) {
+      io.to(opponentSocketId).emit('powerup_triggered', {
         type: randomPower.type,
         duration: randomPower.duration
       });
+    }
+  }
+});
     } else {
       console.log(`⚡ ${player.playerName} → ${randomPower.type} SUR ADVERSAIRE`);
       if (opponentSocketId) {
@@ -758,63 +785,64 @@ if (player.progress >= 81) {
     console.log(`🏁 ${playerId}: ${score}pts en ${timeInSeconds}s`);
   });
 
-  socket.on('playerAbandoned', (data) => {
-    const { roomId, playerId } = data;
+ // ========== LIGNE ~710 - HANDLER playerAbandoned ==========
+
+socket.on('playerAbandoned', (data) => {
+  const { roomId, playerId } = data;
+  
+  const room = rooms[roomId];
+  if (!room) return;
+  
+  const abandoned = room.players[playerId];
+  if (!abandoned) return;
+  
+  console.log(`🚪 ${abandoned.playerName} ABANDONNE`);
+  
+  const opponentId = Object.keys(room.players).find(id => id !== playerId);
+  const opponent = room.players[opponentId];
+  
+  if (opponent) {
+    // ✅✅✅ CALCUL SELON LE MODE
+    const winnerScore = calculateFinalScore(room, opponent);
+    const loserScore = 0; // Abandon = 0 pts
     
-    const room = rooms[roomId];
-    if (!room) return;
+    const result = {
+      winnerId: opponentId,
+      winnerName: opponent.playerName,
+      winnerScore,
+      loserId: playerId,
+      loserName: abandoned.playerName,
+      loserScore,
+      reason: 'opponent_abandoned'
+    };
     
-    const abandoned = room.players[playerId];
-    if (!abandoned) return;
+    finishedGames[opponentId] = {
+      result,
+      timestamp: Date.now()
+    };
+    finishedGames[playerId] = {
+      result,
+      timestamp: Date.now()
+    };
     
-    console.log(`🚪 ${abandoned.playerName} ABANDONNE`);
+    console.log(`💾 Résultat abandon sauvegardé (${room.gameMode})`);
+    console.log(`   Winner: ${winnerScore} pts | Loser: ${loserScore} pts`);
     
-    const opponentId = Object.keys(room.players).find(id => id !== playerId);
-    const opponent = room.players[opponentId];
-    
-    if (opponent) {
-      const elapsed = (Date.now() - room.startTime) / 1000;
-      const winnerScore = calculateScore(opponent, elapsed);
-      
-      const result = {
-        winnerId: opponentId,
-        winnerName: opponent.playerName,
-        winnerScore,
-        loserId: playerId,
-        loserName: abandoned.playerName,
-        loserScore: 0,
-        reason: 'opponent_abandoned'
-      };
-      
-      // ✅✅✅ SAUVEGARDER LE RÉSULTAT
-      finishedGames[opponentId] = {
-        result,
-        timestamp: Date.now()
-      };
-      finishedGames[playerId] = {
-        result,
-        timestamp: Date.now()
-      };
-      
-      console.log(`💾 Résultat abandon sauvegardé pour reconnexion`);
-      
-      io.to(opponent.socketId).emit('game_over', result);
-      io.to(abandoned.socketId).emit('game_over', result);
-      
-      console.log(`🏆 ${opponent.playerName} gagne par abandon`);
-    }
-    
-    Object.values(room.players).forEach(p => {
-      if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
-    });
-    
-    if (disconnectedPlayers[playerId]) {
-      clearTimeout(disconnectedPlayers[playerId].timeout);
-      delete disconnectedPlayers[playerId];
-    }
-    
-    delete rooms[roomId];
+    io.to(opponent.socketId).emit('game_over', result);
+    io.to(abandoned.socketId).emit('game_over', result);
+  }
+  
+  Object.values(room.players).forEach(p => {
+    if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
   });
+  
+  if (disconnectedPlayers[playerId]) {
+    clearTimeout(disconnectedPlayers[playerId].timeout);
+    delete disconnectedPlayers[playerId];
+  }
+  
+  delete rooms[roomId];
+});
 
   socket.on('disconnect', () => {
     console.log('🔌 Déconnexion:', socket.id);
@@ -839,48 +867,49 @@ if (player.progress >= 81) {
         disconnectedPlayers[disconnected.playerId] = {
           roomId,
           timestamp: Date.now(),
-          timeout: setTimeout(() => {
-            console.log(`⏰ ${disconnected.playerName} absent après 60s`);
-            
-            const opponentId = Object.keys(room.players).find(id => id !== disconnected.playerId);
-            const opponent = room.players[opponentId];
-            
-            if (opponent) {
-              const elapsed = (Date.now() - room.startTime) / 1000;
-              const winnerScore = calculateScore(opponent, elapsed);
-              
-              const result = {
-                winnerId: opponentId,
-                winnerName: opponent.playerName,
-                winnerScore,
-                loserId: disconnected.playerId,
-                loserName: disconnected.playerName,
-                loserScore: 0,
-                reason: 'opponent_abandoned'
-              };
-              
-              // ✅✅✅ SAUVEGARDER LE RÉSULTAT
-              finishedGames[opponentId] = {
-                result,
-                timestamp: Date.now()
-              };
-              finishedGames[disconnected.playerId] = {
-                result,
-                timestamp: Date.now()
-              };
-              
-              console.log(`💾 Résultat timeout 60s sauvegardé pour reconnexion`);
-              
-              io.to(opponent.socketId).emit('game_over', result);
-            }
-            
-            Object.values(room.players).forEach(p => {
-              if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
-            });
-            
-            delete rooms[roomId];
-            delete disconnectedPlayers[disconnected.playerId];
-          }, RECONNECT_TIMEOUT)
+        timeout: setTimeout(() => {
+  console.log(`⏰ ${disconnected.playerName} absent après 60s`);
+  
+  const opponentId = Object.keys(room.players).find(id => id !== disconnected.playerId);
+  const opponent = room.players[opponentId];
+  
+  if (opponent) {
+    // ✅✅✅ CALCUL SELON LE MODE
+    const winnerScore = calculateFinalScore(room, opponent);
+    const loserScore = 0; // Timeout = 0 pts
+    
+    const result = {
+      winnerId: opponentId,
+      winnerName: opponent.playerName,
+      winnerScore,
+      loserId: disconnected.playerId,
+      loserName: disconnected.playerName,
+      loserScore,
+      reason: 'opponent_abandoned'
+    };
+    
+    finishedGames[opponentId] = {
+      result,
+      timestamp: Date.now()
+    };
+    finishedGames[disconnected.playerId] = {
+      result,
+      timestamp: Date.now()
+    };
+    
+    console.log(`💾 Résultat timeout 60s sauvegardé (${room.gameMode})`);
+    console.log(`   Winner: ${winnerScore} pts | Loser: ${loserScore} pts`);
+    
+    io.to(opponent.socketId).emit('game_over', result);
+  }
+  
+  Object.values(room.players).forEach(p => {
+    if (p.inactivityTimer) clearTimeout(p.inactivityTimer);
+  });
+  
+  delete rooms[roomId];
+  delete disconnectedPlayers[disconnected.playerId];
+}, RECONNECT_TIMEOUT)
         };
         
         const opponentId = Object.keys(room.players).find(id => id !== disconnected.playerId);
@@ -1011,5 +1040,6 @@ server.listen(PORT, () => {
   console.log(`🌐 Health: http://localhost:${PORT}/health`);
   console.log(`📊 Stats: http://localhost:${PORT}/stats`);
 });
+
 
 
